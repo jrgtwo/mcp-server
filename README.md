@@ -14,7 +14,8 @@ src/
 └── tools/
     ├── generate.py     # Tool: generate
     ├── chat.py         # Tool: chat
-    └── weather.py      # Tool: get_weather
+    ├── weather.py      # Tool: get_weather
+    └── agent.py        # Tool: run_agent (autonomous ReAct agent)
 ```
 
 ## Requirements
@@ -122,6 +123,53 @@ Chat with the local LLM using a conversation history. Applies the model's built-
   "temperature": 0.7,
   "max_new_tokens": 256
 }
+```
+
+---
+
+### `run_agent`
+
+Run an autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent powered by the local LLM. The agent reasons step by step and calls tools as many times as needed before producing a final answer — no external API required.
+
+**How it works**
+
+```
+User goal
+   ↓
+LLM decides: call a tool or answer?
+   ↓ (if tool)
+Tool executes → result fed back to LLM
+   ↓
+LLM decides again … (repeats up to max_steps)
+   ↓ (when done)
+FINAL answer returned
+```
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `goal` | `string` | *(required)* | The task or question for the agent to solve |
+| `max_steps` | `int` | `10` | Maximum tool-call iterations before stopping |
+
+**Returns:** The agent's final answer as plain text.
+
+**Tools available to the agent**
+
+| Tool | Description |
+|---|---|
+| `get_weather` | Fetch current weather for any city |
+
+**Examples**
+
+Single tool call:
+```json
+{"goal": "What should I wear in Paris today?"}
+```
+
+Multi-step (two tool calls):
+```json
+{"goal": "Compare the weather in London and Tokyo, then tell me which city is warmer."}
 ```
 
 ---
