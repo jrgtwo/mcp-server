@@ -1,0 +1,16 @@
+# Core server framework
+fastmcp
+
+# HTTP client (weather tool)
+httpx
+
+# ML — install the CUDA variant manually if needed:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+torch
+transformers
+
+# Model loading optimisations (recommended for large models)
+accelerate
+
+# HTTP transport (starlette CORS middleware)
+starlette
