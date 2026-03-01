@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from model import generate_tokens
+from model import _log, generate_tokens
 
 
 def register(mcp: FastMCP) -> None:
@@ -33,7 +33,10 @@ def register(mcp: FastMCP) -> None:
         Returns:
             The generated text (input prompt NOT included).
         """
-        return generate_tokens(
+        _log(f"[generate] prompt={len(prompt)} chars, max_new_tokens={max_new_tokens}, temp={temperature}")
+        result = generate_tokens(
             prompt, max_new_tokens, temperature, top_p,
             top_k, repetition_penalty, stop_sequences, seed,
         )
+        _log(f"[generate] Done — generated {len(result)} chars.")
+        return result

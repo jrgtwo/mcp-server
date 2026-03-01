@@ -8,6 +8,9 @@ Tools exposed:
     generate(prompt, ...)            - raw text completion
     chat(messages, ...)              - chat-style with role/content messages
     get_weather(location, units)     - current weather via Open-Meteo (no key needed)
+    get_datetime(timezone)           - current date and time for any IANA timezone
+    fetch_url(url, max_chars)        - fetch and extract text from any URL
+    news_headlines(topic, ...)       - latest news via NewsAPI (requires NEWSAPI_KEY)
 
 Resources:
     llm://info               - model metadata
@@ -18,9 +21,12 @@ from __future__ import annotations
 import argparse
 import sys
 
+from dotenv import load_dotenv
 from fastmcp import FastMCP
 
 from model import _log, lifespan, state
+
+load_dotenv()
 import resources
 import tools
 

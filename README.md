@@ -1,6 +1,6 @@
 # MCP Local LLM Server
 
-A [FastMCP](https://github.com/jlowin/fastmcp) server that exposes a locally-hosted HuggingFace language model as MCP tools, plus a free weather tool.
+A [FastMCP](https://github.com/jlowin/fastmcp) server that exposes a locally-hosted HuggingFace language model as MCP tools, plus a suite of utility tools for weather, news, web fetching, and more.
 
 ## Overview
 
@@ -15,6 +15,9 @@ src/
     ├── generate.py     # Tool: generate
     ├── chat.py         # Tool: chat
     ├── weather.py      # Tool: get_weather
+    ├── date_time.py    # Tool: get_datetime
+    ├── fetch_url.py    # Tool: fetch_url
+    ├── news.py         # Tool: news_headlines
     └── agent.py        # Tool: run_agent (autonomous ReAct agent)
 ```
 
@@ -35,6 +38,28 @@ For GPU support, install the CUDA build of PyTorch separately:
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cu128
 ```
+
+On Windows, IANA timezone data is not bundled with Python. Install it for the `get_datetime` tool to support non-UTC timezones:
+
+```bash
+pip install tzdata
+```
+
+## Configuration
+
+Some tools require API keys. Create a `.env` file in the project root (it is already gitignored):
+
+```
+NEWSAPI_KEY=your_key_here
+```
+
+The server loads this file automatically on startup. Keys are never committed to version control.
+
+| Variable | Required by | Where to get it |
+|---|---|---|
+| `NEWSAPI_KEY` | `news_headlines` | [newsapi.org](https://newsapi.org) — free tier available |
+
+---
 
 ## Starting the Server
 
@@ -159,6 +184,9 @@ FINAL answer returned
 | Tool | Description |
 |---|---|
 | `get_weather` | Fetch current weather for any city |
+| `get_datetime` | Get the current date and time in any timezone |
+| `fetch_url` | Fetch and extract text from any URL |
+| `news_headlines` | Search for the latest news headlines by topic |
 
 **Examples**
 
@@ -167,9 +195,17 @@ Single tool call:
 {"goal": "What should I wear in Paris today?"}
 ```
 
-Multi-step (two tool calls):
+Multi-step (multiple tool calls):
 ```json
 {"goal": "Compare the weather in London and Tokyo, then tell me which city is warmer."}
+```
+
+```json
+{"goal": "Find the latest AI news and summarise the top 3 stories."}
+```
+
+```json
+{"goal": "What time is it in Sydney right now, and what is the weather like there?"}
 ```
 
 ---
@@ -195,6 +231,75 @@ Weather in London, England, United Kingdom:
   Temperature: 12.3°C
   Humidity:    74%
   Wind:        18.5 km/h
+```
+
+---
+
+### `get_datetime`
+
+Return the current date and time for any IANA timezone. No API key required.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `timezone` | `string` | `"UTC"` | IANA timezone name (e.g. `"America/New_York"`, `"Europe/London"`, `"Asia/Tokyo"`) |
+
+**Returns:** A formatted date/time string, e.g. `"2025-03-01 14:30:00 EST (UTC-0500)"`.
+
+> **Windows note:** Non-UTC timezones require `pip install tzdata`.
+
+**Example**
+
+```json
+{"timezone": "America/Chicago"}
+```
+
+---
+
+### `fetch_url`
+
+Fetch the content of any URL and return it as plain text. HTML pages are stripped of tags; JSON and plain-text responses are returned as-is. No API key required.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `url` | `string` | *(required)* | URL to fetch (must start with `http://` or `https://`) |
+| `max_chars` | `int` | `4000` | Maximum characters to return before truncating |
+
+**Returns:** Extracted page text, truncated to `max_chars` if needed.
+
+**Example**
+
+```json
+{"url": "https://en.wikipedia.org/wiki/Python_(programming_language)", "max_chars": 2000}
+```
+
+---
+
+### `news_headlines`
+
+Fetch the latest news headlines, optionally filtered by a topic keyword. Requires a free [NewsAPI](https://newsapi.org) key set in `.env`.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `topic` | `string` | `""` | Keyword(s) to filter by (e.g. `"AI"`, `"climate change"`). Leave blank for general top headlines |
+| `country` | `string` | `"us"` | 2-letter country code used when `topic` is blank (e.g. `us`, `gb`, `au`, `de`) |
+| `max_results` | `int` | `5` | Number of headlines to return (1–10) |
+
+**Returns:** A numbered list of headlines with source name, publication date, and URL.
+
+**Example output**
+
+```
+1. [BBC News] Scientists discover new exoplanet
+   Published: 2025-03-01
+   https://bbc.co.uk/...
+
+2. [Reuters] ...
 ```
 
 ---

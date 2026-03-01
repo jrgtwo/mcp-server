@@ -26,12 +26,16 @@ state = ModelState()
 @asynccontextmanager
 async def lifespan(server: FastMCP):
     _log(f"Loading model from '{state.model_path}' ...")
+    _log(f"CUDA available: {torch.cuda.is_available()}")
+    _log(f"PyTorch CUDA build version: {torch.version.cuda}")
+    if torch.cuda.is_available():
+        _log(f"GPU: {torch.cuda.get_device_name(0)}")
     state.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     state.tokenizer = AutoTokenizer.from_pretrained(state.model_path)
     state.model = AutoModelForCausalLM.from_pretrained(
         state.model_path,
-        torch_dtype=torch.float16 if state.device == "cuda" else torch.float32,
+        dtype=torch.float16 if state.device == "cuda" else torch.float32,
         device_map=state.device,
     )
     state.model.eval()

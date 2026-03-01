@@ -6,7 +6,10 @@ import re
 
 from fastmcp import FastMCP
 
-from model import generate_tokens
+from model import _log, generate_tokens
+from tools.date_time import _get_datetime
+from tools.fetch_url import _fetch_url
+from tools.news import _news_headlines
 from tools.weather import _fetch_weather
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -18,6 +21,12 @@ and calling tools when needed.
 TOOLS AVAILABLE:
 - get_weather(location: str, units: str = "metric") -> str
     Fetch current weather for a city. units: "metric" or "imperial".
+- get_datetime(timezone: str = "UTC") -> str
+    Return the current date and time. timezone: IANA name e.g. "America/New_York".
+- fetch_url(url: str, max_chars: int = 4000) -> str
+    Fetch and return the text content of any URL.
+- news_headlines(topic: str = "", country: str = "us", max_results: int = 5) -> str
+    Fetch latest news headlines. topic: keyword filter; leave blank for top headlines.
 
 To call a tool, output EXACTLY this format (nothing else on those lines):
 TOOL: <tool_name>
@@ -61,12 +70,25 @@ def _parse_action(text: str) -> tuple[str, dict] | tuple[str, str] | tuple[None,
 
 async def _execute_tool(name: str, args: dict) -> str:
     """Dispatch a tool call and return its string result."""
-    if name == "get_weather":
-        location = args.get("location", "")
-        units    = args.get("units", "metric")
-        return await _fetch_weather(location, units)
+    _log(f"[agent] >> tool call: {name}({args})")
 
-    return f"Unknown tool '{name}'."
+    if name == "get_weather":
+        result = await _fetch_weather(args.get("location", ""), args.get("units", "metric"))
+    elif name == "get_datetime":
+        result = _get_datetime(args.get("timezone", "UTC"))
+    elif name == "fetch_url":
+        result = await _fetch_url(args.get("url", ""), args.get("max_chars", 4000))
+    elif name == "news_headlines":
+        result = await _news_headlines(
+            args.get("topic", ""),
+            args.get("country", "us"),
+            args.get("max_results", 5),
+        )
+    else:
+        result = f"Unknown tool '{name}'."
+
+    _log(f"[agent] << tool result: {result}")
+    return result
 
 
 def _build_prompt(messages: list[dict[str, str]]) -> str:
@@ -105,12 +127,15 @@ def register(mcp: FastMCP) -> None:
         Returns:
             The agent's final answer, or a partial trace if max_steps is reached.
         """
+        _log(f'[agent] Starting — goal: "{goal}"')
+
         messages: list[dict[str, str]] = [
             {"role": "system",  "content": _SYSTEM_PROMPT},
             {"role": "user",    "content": goal},
         ]
 
         for step in range(max_steps):
+            _log(f"[agent] Step {step + 1}/{max_steps} — calling LLM...")
             prompt   = _build_prompt(messages)
             # generate_tokens is synchronous/CPU-bound — run off the event loop
             response = await asyncio.to_thread(
@@ -120,19 +145,24 @@ def register(mcp: FastMCP) -> None:
                 0.3,   # temperature (lower = more deterministic for tool use)
                 0.9,   # top_p
             )
+            _log(f"[agent] LLM response: {response[:300]}{'...' if len(response) > 300 else ''}")
 
             action, payload = _parse_action(response)
 
             if action == "FINAL":
+                _log(f"[agent] FINAL answer reached after {step + 1} step(s).")
                 return payload  # type: ignore[return-value]
 
             if action is not None:
+                _log(f"[agent] Parsed action: {action}")
                 # Execute the requested tool
                 tool_result = await _execute_tool(action, payload)  # type: ignore[arg-type]
                 messages.append({"role": "assistant", "content": response})
                 messages.append({"role": "tool",      "content": tool_result})
             else:
                 # LLM didn't follow the format — treat its output as the answer
+                _log("[agent] LLM did not follow format — returning raw output.")
                 return response
 
+        _log(f"[agent] Max steps ({max_steps}) reached without a FINAL answer.")
         return f"Agent stopped after {max_steps} steps without a FINAL answer."

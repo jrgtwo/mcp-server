@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from model import build_chat_prompt, generate_tokens
+from model import _log, build_chat_prompt, generate_tokens
 
 
 def register(mcp: FastMCP) -> None:
@@ -34,8 +34,11 @@ def register(mcp: FastMCP) -> None:
         Returns:
             The assistant's reply as plain text.
         """
+        _log(f"[chat] {len(messages)} message(s), max_new_tokens={max_new_tokens}, temp={temperature}")
         prompt = build_chat_prompt(messages)
-        return generate_tokens(
+        result = generate_tokens(
             prompt, max_new_tokens, temperature, top_p,
             top_k, repetition_penalty, stop_sequences, seed,
         )
+        _log(f"[chat] Done — generated {len(result)} chars.")
+        return result
