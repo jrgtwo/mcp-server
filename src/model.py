@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -71,8 +72,11 @@ def generate_tokens(
         if state.device == "cuda":
             torch.cuda.manual_seed(seed)
 
+    t0 = time.perf_counter()
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_len = inputs["input_ids"].shape[1]
+    t_tok = time.perf_counter()
+    _log(f"[generate] Tokenised {len(prompt)} chars → {input_len} tokens ({t_tok - t0:.2f}s). Generating up to {max_new_tokens} new tokens...")
 
     do_sample = temperature > 0.0
     gen_kwargs: dict[str, Any] = dict(
@@ -94,8 +98,17 @@ def generate_tokens(
     with torch.no_grad():
         output_ids = model.generate(**inputs, **gen_kwargs)
 
+    t_gen = time.perf_counter()
     new_ids = output_ids[0][input_len:]
-    return tokenizer.decode(new_ids, skip_special_tokens=True)
+    output_len = len(new_ids)
+    result = tokenizer.decode(new_ids, skip_special_tokens=True)
+    t_done = time.perf_counter()
+    _log(
+        f"[generate] Done — {output_len} new tokens in {t_gen - t_tok:.2f}s "
+        f"({output_len / max(t_gen - t_tok, 0.001):.1f} tok/s), "
+        f"decode {t_done - t_gen:.2f}s, total {t_done - t0:.2f}s"
+    )
+    return result
 
 
 def build_chat_prompt(messages: list[dict[str, str]]) -> str:
