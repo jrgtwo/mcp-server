@@ -1,8 +1,11 @@
 # Core server framework
 fastmcp
 
-# HTTP client (weather tool)
+# HTTP client (weather tool, fetch_url)
 httpx
+
+# HTML parsing (fetch_url)
+beautifulsoup4
 
 # ML — install the CUDA variant manually if needed:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu128

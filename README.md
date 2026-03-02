@@ -18,7 +18,11 @@ src/
     ├── date_time.py    # Tool: get_datetime
     ├── fetch_url.py    # Tool: fetch_url
     ├── news.py         # Tool: news_headlines
-    └── agent.py        # Tool: run_agent (autonomous ReAct agent)
+    ├── agent.py        # Tool: run_agent (autonomous ReAct agent)
+    ├── explain_code.py # Tool: explain_code (coding tutor)
+    ├── review_code.py  # Tool: review_code  (coding tutor)
+    ├── run_python.py   # Tool: run_python   (coding tutor)
+    └── coding_tutor.py # Tool: coding_tutor (orchestrating tutor agent)
 ```
 
 ## Requirements
@@ -176,8 +180,13 @@ FINAL answer returned
 |---|---|---|---|
 | `goal` | `string` | *(required)* | The task or question for the agent to solve |
 | `max_steps` | `int` | `10` | Maximum tool-call iterations before stopping |
+| `max_new_tokens` | `int` | `1024` | Token ceiling per LLM call. Tool-call steps stop well before this; it mainly affects the length of the final answer |
+| `max_history_pairs` | `int` | `4` | Number of recent assistant+tool rounds to keep in full. Older rounds are summarised and replaced to keep the prompt size manageable |
+| `summary_strategy` | `string` | `"deterministic"` | How to summarise trimmed history. `"deterministic"` — fast, rule-based bullet points. `"llm"` — model-generated prose summary (adds an extra generation call) |
 
 **Returns:** The agent's final answer as plain text.
+
+> **Note:** If you see `Max steps (N) reached without a FINAL answer`, the agent used all its iterations without concluding. Either the task needs more steps (increase `max_steps`) or the model looped on tool calls — check the step logs to diagnose.
 
 **Tools available to the agent**
 
@@ -186,7 +195,7 @@ FINAL answer returned
 | `get_weather` | Fetch current weather for any city |
 | `get_datetime` | Get the current date and time in any timezone |
 | `fetch_url` | Fetch and extract text from any URL |
-| `news_headlines` | Search for the latest news headlines by topic |
+| `news_headlines` | Fetch the latest news headlines, using the user's location or subject of interest as the topic |
 
 **Examples**
 
@@ -201,12 +210,195 @@ Multi-step (multiple tool calls):
 ```
 
 ```json
-{"goal": "Find the latest AI news and summarise the top 3 stories."}
+{"goal": "What are the top US political news stories right now? Summarise the top 3."}
 ```
 
 ```json
 {"goal": "What time is it in Sydney right now, and what is the weather like there?"}
 ```
+
+---
+
+## Coding Tutor Tools
+
+Four tools that turn the server into an interactive programming tutor. The high-level entry point is `coding_tutor`; the three supporting tools (`explain_code`, `review_code`, `run_python`) can also be called directly.
+
+### `coding_tutor`
+
+An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for teaching. It reasons step by step, calling `explain_code`, `review_code`, `run_python`, and `fetch_url` as needed, then produces a pedagogical answer that explains the *why* before the *what*.
+
+**How it works**
+
+```
+Your question
+   ↓
+Tutor LLM decides: call a tool or answer?
+   ↓ (if tool)
+explain_code / review_code / run_python / fetch_url
+   → result fed back to LLM
+   ↓
+LLM decides again … (up to max_steps)
+   ↓
+FINAL teaching response
+```
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `question` | `string` | *(required)* | Your coding question, code snippet, or error message |
+| `max_steps` | `int` | `8` | Maximum tool-call iterations before stopping |
+| `max_new_tokens` | `int` | `1024` | Token ceiling per LLM call |
+| `max_history_pairs` | `int` | `4` | Recent assistant+tool rounds to keep before older ones are summarised |
+| `summary_strategy` | `string` | `"deterministic"` | `"deterministic"` (fast bullet-point summary) or `"llm"` (model-generated prose) |
+
+**Returns:** A teaching response as plain text.
+
+**Examples**
+
+```json
+{"question": "Why does my list comprehension give the wrong result?\n\nmy_list = [1, 2, 3]\nresult = [x * 2 for x in my_list if x > 1]"}
+```
+
+```json
+{"question": "Explain the difference between a shallow copy and a deep copy in Python, with examples."}
+```
+
+```json
+{"question": "I'm getting a RecursionError in this code. What does it mean and how do I fix it?\n\ndef count_down(n):\n    return count_down(n - 1)"}
+```
+
+> **Tip:** The tutor infers your skill level from your question. Use plain language for beginner explanations, or technical terminology to get a more advanced response.
+
+---
+
+### `explain_code`
+
+Explain a code snippet using the local LLM, tailored to the learner's skill level.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `code` | `string` | *(required)* | The source code to explain (capped at 6000 chars) |
+| `language` | `string` | `"python"` | Programming language of the snippet |
+| `level` | `string` | `"beginner"` | Explanation depth: `"beginner"`, `"intermediate"`, or `"advanced"` |
+| `max_new_tokens` | `int` | `768` | Maximum tokens for the explanation |
+
+**Level guidance**
+
+| Level | Audience |
+|---|---|
+| `beginner` | New to programming — plain language, analogies, first-principles explanations |
+| `intermediate` | Knows the basics — focuses on how/why, language patterns, idioms |
+| `advanced` | Experienced developer — design decisions, complexity, edge cases, subtle behaviour |
+
+**Returns:** A plain-text explanation of the code.
+
+**Examples**
+
+```json
+{
+  "code": "result = [x**2 for x in range(10) if x % 2 == 0]",
+  "level": "beginner"
+}
+```
+
+```json
+{
+  "code": "with open('data.csv') as f:\n    reader = csv.DictReader(f)\n    rows = list(reader)",
+  "language": "python",
+  "level": "intermediate"
+}
+```
+
+---
+
+### `review_code`
+
+Review a code snippet for issues using the local LLM. Outputs a structured report: overall impression, numbered issues with severity, positives, and a top recommendation.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `code` | `string` | *(required)* | The source code to review (capped at 6000 chars) |
+| `language` | `string` | `"python"` | Programming language of the snippet |
+| `focus` | `string` | `"general"` | Review focus: `"general"`, `"security"`, `"performance"`, or `"style"` |
+| `max_new_tokens` | `int` | `768` | Maximum tokens for the review |
+
+**Focus options**
+
+| Focus | What it checks |
+|---|---|
+| `general` | Bugs, logic errors, bad practices, readability |
+| `security` | Injection risks, insecure data handling, auth flaws, secrets in code |
+| `performance` | Algorithmic complexity, unnecessary allocations, blocking calls, caching |
+| `style` | Naming, function length, duplication, idiomatic patterns, comments |
+
+**Returns:** A structured review with four sections: *Overall Impression*, *Issues Found* (numbered, each with severity, location, description, and fix), *Positives*, and *Top Recommendation*.
+
+**Example**
+
+```json
+{
+  "code": "def get_user(id):\n    query = f\"SELECT * FROM users WHERE id = {id}\"\n    return db.execute(query)",
+  "focus": "security"
+}
+```
+
+---
+
+### `run_python`
+
+Execute a short Python snippet in a sandboxed subprocess and return its output. Designed for live demos during tutoring sessions — dangerous operations are blocked before execution.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `code` | `string` | *(required)* | The Python code to execute |
+| `timeout_seconds` | `int` | `10` | Maximum execution time in seconds (clamped to 1–30) |
+
+**Returns:** A string with three sections:
+
+```
+EXIT CODE: 0
+STDOUT:
+4
+
+STDERR:
+
+```
+
+**Security**
+
+The following patterns are blocked and will never execute:
+
+| Blocked pattern | Reason |
+|---|---|
+| `import os`, `import sys`, `import subprocess`, `import socket`, `import shutil` | Filesystem / process / network access |
+| `__import__`, `importlib` | Dynamic import bypass |
+| `open(` | File I/O |
+| `exec(`, `eval(`, `compile(` | Arbitrary code execution |
+
+Blocked code returns a clear message identifying the pattern — nothing is executed.
+
+**Examples**
+
+```json
+{"code": "print(2 + 2)"}
+```
+→ `EXIT CODE: 0\nSTDOUT:\n4\nSTDERR:\n`
+
+```json
+{"code": "for i in range(5):\n    print(i ** 2)"}
+```
+
+```json
+{"code": "import os; os.listdir('.')"}
+```
+→ `Execution blocked: the pattern 'import os' is not permitted for safety reasons.`
 
 ---
 

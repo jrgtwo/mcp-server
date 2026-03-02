@@ -25,9 +25,9 @@ TOOLS AVAILABLE:
 - get_datetime(timezone: str = "UTC") -> str
     Return the current date and time. timezone: IANA name e.g. "America/New_York".
 - fetch_url(url: str, max_chars: int = 4000) -> str
-    Fetch and return the text content of any URL.
+    Fetch and return the text content of a specific URL. Use this whenever the user provides a URL or asks about a specific website.
 - news_headlines(topic: str = "", country: str = "us", max_results: int = 5) -> str
-    Fetch latest news headlines. topic: keyword filter; leave blank for top headlines.
+    Search for the latest news headlines by topic. Use this when the user asks for news about a subject or location but has NOT provided a specific URL. Set topic to the user's location or subject of interest (e.g. "Solvang", "Santa Barbara"). Leave blank for general top headlines.
 
 To call a tool, output EXACTLY this format (nothing else on those lines):
 TOOL: <tool_name>
@@ -44,12 +44,24 @@ Rules:
 - Only call one tool per response.
 - Always output either a TOOL block OR a FINAL block — never both.
 - After receiving a tool result it will be shown as RESULT: ... — use it to continue.
+- If a tool returns empty or no useful content, report that to the user in your FINAL answer — do NOT call a different tool as a substitute.
 """
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 _TOOL_RE  = re.compile(r"TOOL:\s*(\w+)\s*\nARGS:\s*(\{.*?\})", re.DOTALL)
 _FINAL_RE = re.compile(r"FINAL:\s*(.*)", re.DOTALL)
+
+
+def _truncate_to_first_action(text: str) -> str:
+    """Discard everything after the first complete TOOL+ARGS or FINAL block."""
+    m = _TOOL_RE.search(text)
+    if m:
+        return text[:m.end()].strip()
+    m = _FINAL_RE.search(text)
+    if m:
+        return text[:m.end()].strip()
+    return text
 
 
 def _parse_action(text: str) -> tuple[str, dict] | tuple[str, str] | tuple[None, None]:
@@ -203,7 +215,7 @@ def register(mcp: FastMCP) -> None:
     async def run_agent(
         goal: str,
         max_steps: int = 10,
-        max_new_tokens: int = 2048,
+        max_new_tokens: int = 1024,
         max_history_pairs: int = 4,
         summary_strategy: str = "deterministic",
     ) -> str:
@@ -254,12 +266,14 @@ def register(mcp: FastMCP) -> None:
                 max_new_tokens,
                 0.3,   # temperature (lower = more deterministic for tool use)
                 0.9,   # top_p
+                stop_sequences=["RESULT:", "(waiting"],
             )
             _log(
                 f"[agent] Step {step + 1} LLM done in {time.perf_counter() - t_step:.2f}s — "
                 f"response: {response[:300]}{'...' if len(response) > 300 else ''}"
             )
 
+            response = _truncate_to_first_action(response)
             action, payload = _parse_action(response)
 
             if action == "FINAL":
