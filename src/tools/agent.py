@@ -266,7 +266,7 @@ def register(mcp: FastMCP) -> None:
                 max_new_tokens,
                 0.3,   # temperature (lower = more deterministic for tool use)
                 0.9,   # top_p
-                stop_sequences=["RESULT:", "(waiting"],
+                stop_sequences=["RESULT:", "(waiting", "\n[USER]", "\n[ASSISTANT]"],
             )
             _log(
                 f"[agent] Step {step + 1} LLM done in {time.perf_counter() - t_step:.2f}s — "

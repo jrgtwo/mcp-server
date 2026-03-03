@@ -33,20 +33,40 @@ import tools
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="FastMCP local-LLM server")
-    parser.add_argument("--model", required=True, help="Path to local model directory")
+    parser.add_argument("--model", required=True, help="Path to .gguf file or directory containing one")
     parser.add_argument(
         "--transport",
         default="stdio",
         choices=["stdio", "http"],
         help="Transport to use (default: stdio)",
     )
-    parser.add_argument("--port", type=int, default=8000, help="Port for HTTP transport")
+    parser.add_argument("--port", type=int, default=8000, help="Port for MCP HTTP transport")
+    parser.add_argument(
+        "--llama-server", required=True,
+        help="Path to llama-server executable",
+    )
+    parser.add_argument(
+        "--server-port", type=int, default=8080,
+        help="Port for the llama-server backend (default: 8080)",
+    )
+    parser.add_argument(
+        "--gpu-layers", type=int, default=-1,
+        help="Number of model layers to offload to GPU; -1 = all (default: -1)",
+    )
+    parser.add_argument(
+        "--context-size", type=int, default=4096,
+        help="Context window size in tokens (default: 4096)",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
     state.model_path = args.model
+    state.server_bin = args.llama_server
+    state.server_port = args.server_port
+    state.n_gpu_layers = args.gpu_layers
+    state.n_ctx = args.context_size
 
     mcp = FastMCP("local-llm", lifespan=lifespan)
     tools.register_all(mcp)

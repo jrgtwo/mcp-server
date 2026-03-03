@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 import time
 from contextlib import asynccontextmanager
-from typing import Any
+from pathlib import Path
 
-import torch
+import httpx
 from fastmcp import FastMCP
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 def _log(msg: str) -> None:
@@ -15,40 +15,84 @@ def _log(msg: str) -> None:
 
 
 class ModelState:
-    model: AutoModelForCausalLM | None = None
-    tokenizer: AutoTokenizer | None = None
+    process: subprocess.Popen | None = None
+    client: httpx.Client | None = None
     model_path: str = ""
-    device: str = "cpu"
+    n_gpu_layers: int = -1
+    n_ctx: int = 4096
+    server_bin: str = ""
+    server_port: int = 8080
 
 
 state = ModelState()
 
 
+def _find_gguf(path: str) -> str:
+    """Return path as-is if it's a .gguf file, or pick the best one in the directory.
+
+    Excludes mmproj-*.gguf (multimodal projector files, not language models).
+    Prefers Q4_K_M; falls back to the first file alphabetically.
+    """
+    p = Path(path)
+    if p.is_file():
+        return str(p)
+    candidates = sorted(f for f in p.glob("*.gguf") if not f.name.startswith("mmproj"))
+    if not candidates:
+        raise FileNotFoundError(f"No model .gguf file found in {path!r}")
+    preferred = next((f for f in candidates if "Q4_K_M" in f.name), None)
+    chosen = preferred or candidates[0]
+    if len(candidates) > 1:
+        _log(f"Multiple .gguf files found; using {chosen.name}")
+    return str(chosen)
+
+
 @asynccontextmanager
 async def lifespan(server: FastMCP):
-    _log(f"Loading model from '{state.model_path}' ...")
-    _log(f"CUDA available: {torch.cuda.is_available()}")
-    _log(f"PyTorch CUDA build version: {torch.version.cuda}")
-    if torch.cuda.is_available():
-        _log(f"GPU: {torch.cuda.get_device_name(0)}")
-    state.device = "cuda" if torch.cuda.is_available() else "cpu"
+    model_file = _find_gguf(state.model_path)
+    base_url = f"http://127.0.0.1:{state.server_port}"
 
-    state.tokenizer = AutoTokenizer.from_pretrained(state.model_path)
-    state.model = AutoModelForCausalLM.from_pretrained(
-        state.model_path,
-        dtype=torch.float16 if state.device == "cuda" else torch.float32,
-        device_map=state.device,
-    )
-    state.model.eval()
-    _log(f"Model ready on {state.device}.")
+    cmd = [
+        state.server_bin,
+        "--model", model_file,
+        "--n-gpu-layers", str(state.n_gpu_layers),
+        "--ctx-size", str(state.n_ctx),
+        "--port", str(state.server_port),
+        "--host", "127.0.0.1",
+        "--no-mmap",
+    ]
+    _log(f"Starting llama-server: {' '.join(cmd)}")
+    # Inherit parent's stdout/stderr so llama-server logs flow to the terminal
+    # and the pipe buffer never fills up and stalls the process.
+    state.process = subprocess.Popen(cmd)
 
-    yield  # server runs here
+    # Wait for the server to become ready (up to 120 s for large models)
+    state.client = httpx.Client(base_url=base_url, timeout=300.0)
+    for attempt in range(120):
+        time.sleep(1)
+        if state.process.poll() is not None:
+            raise RuntimeError(f"llama-server exited unexpectedly (code {state.process.returncode}).")
+        try:
+            r = state.client.get("/health")
+            if r.status_code == 200:
+                _log(f"llama-server ready on port {state.server_port} (took {attempt + 1}s).")
+                break
+        except httpx.ConnectError:
+            pass
+    else:
+        state.process.terminate()
+        raise RuntimeError("llama-server did not become ready within 120 s.")
 
-    _log("Shutting down, releasing model.")
-    del state.model
-    del state.tokenizer
-    state.model = None
-    state.tokenizer = None
+    yield  # MCP server runs here
+
+    _log("Shutting down llama-server.")
+    state.process.terminate()
+    try:
+        state.process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        state.process.kill()
+    state.client.close()
+    state.process = None
+    state.client = None
 
 
 def generate_tokens(
@@ -61,70 +105,75 @@ def generate_tokens(
     stop_sequences: list[str] | None = None,
     seed: int | None = None,
 ) -> str:
-    """Tokenise, run model.generate, decode only the new tokens."""
-    model = state.model
-    tokenizer = state.tokenizer
-    if model is None or tokenizer is None:
+    """Raw text completion via llama-server /v1/completions."""
+    client = state.client
+    if client is None:
         raise RuntimeError("Model is not loaded.")
 
+    payload: dict = {
+        "prompt": prompt,
+        "max_tokens": max_new_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": top_k if top_k > 0 else 40,
+        "repeat_penalty": repetition_penalty,
+        "stop": stop_sequences or [],
+    }
     if seed is not None:
-        torch.manual_seed(seed)
-        if state.device == "cuda":
-            torch.cuda.manual_seed(seed)
+        payload["seed"] = seed
 
     t0 = time.perf_counter()
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    input_len = inputs["input_ids"].shape[1]
-    t_tok = time.perf_counter()
-    _log(f"[generate] Tokenised {len(prompt)} chars → {input_len} tokens ({t_tok - t0:.2f}s). Generating up to {max_new_tokens} new tokens...")
-
-    do_sample = temperature > 0.0
-    gen_kwargs: dict[str, Any] = dict(
-        max_new_tokens=max_new_tokens,
-        do_sample=do_sample,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-    if do_sample:
-        gen_kwargs["temperature"] = temperature
-        gen_kwargs["top_p"] = top_p
-        if top_k > 0:
-            gen_kwargs["top_k"] = top_k
-    if repetition_penalty != 1.0:
-        gen_kwargs["repetition_penalty"] = repetition_penalty
-    if stop_sequences:
-        gen_kwargs["stop_strings"] = stop_sequences
-        gen_kwargs["tokenizer"] = tokenizer
-
-    with torch.no_grad():
-        output_ids = model.generate(**inputs, **gen_kwargs)
-
-    t_gen = time.perf_counter()
-    new_ids = output_ids[0][input_len:]
-    output_len = len(new_ids)
-    result = tokenizer.decode(new_ids, skip_special_tokens=True)
+    r = client.post("/v1/completions", json=payload)
+    r.raise_for_status()
+    data = r.json()
     t_done = time.perf_counter()
+
+    text: str = data["choices"][0]["text"]
+    gen_tokens = data.get("usage", {}).get("completion_tokens", 0)
     _log(
-        f"[generate] Done — {output_len} new tokens in {t_gen - t_tok:.2f}s "
-        f"({output_len / max(t_gen - t_tok, 0.001):.1f} tok/s), "
-        f"decode {t_done - t_gen:.2f}s, total {t_done - t0:.2f}s"
+        f"[generate] {gen_tokens} tokens in {t_done - t0:.2f}s "
+        f"({gen_tokens / max(t_done - t0, 0.001):.1f} tok/s)"
     )
-    return result
+    return text
 
 
-def build_chat_prompt(messages: list[dict[str, str]]) -> str:
-    """Apply the tokenizer's chat template, or fall back to a plain format."""
-    tokenizer = state.tokenizer
-    if tokenizer is None:
+def generate_chat(
+    messages: list[dict[str, str]],
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    top_k: int = 0,
+    repetition_penalty: float = 1.0,
+    stop_sequences: list[str] | None = None,
+    seed: int | None = None,
+) -> str:
+    """Chat completion via llama-server /v1/chat/completions."""
+    client = state.client
+    if client is None:
         raise RuntimeError("Model is not loaded.")
 
-    if getattr(tokenizer, "chat_template", None):
-        return tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+    payload: dict = {
+        "messages": messages,
+        "max_tokens": max_new_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": top_k if top_k > 0 else 40,
+        "repeat_penalty": repetition_penalty,
+        "stop": stop_sequences or [],
+    }
+    if seed is not None:
+        payload["seed"] = seed
 
-    # Fallback: simple "role: content" lines
-    lines = [f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages]
-    lines.append("assistant:")
-    return "\n".join(lines)
+    t0 = time.perf_counter()
+    r = client.post("/v1/chat/completions", json=payload)
+    r.raise_for_status()
+    data = r.json()
+    t_done = time.perf_counter()
+
+    text: str = data["choices"][0]["message"]["content"] or ""
+    gen_tokens = data.get("usage", {}).get("completion_tokens", 0)
+    _log(
+        f"[chat] {gen_tokens} tokens in {t_done - t0:.2f}s "
+        f"({gen_tokens / max(t_done - t0, 0.001):.1f} tok/s)"
+    )
+    return text
