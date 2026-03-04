@@ -15,7 +15,6 @@ from tools.agent import (
 from tools.explain_code import _explain_code
 from tools.fetch_url import _fetch_url
 from tools.review_code import _review_code
-from tools.run_python import _run_python
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -29,9 +28,6 @@ TOOLS AVAILABLE:
     level options: "beginner", "intermediate", "advanced"
 - review_code(code: str, language: str = "python", focus: str = "general") -> str
     Review code for issues. focus options: "general", "security", "performance", "style"
-- run_python(code: str, timeout_seconds: int = 10) -> str
-    Execute a short Python snippet safely and return its output. Use this to \
-demonstrate concepts with live examples. Dangerous imports and I/O are blocked.
 - fetch_url(url: str, max_chars: int = 4000) -> str
     Fetch the text content of a URL. Use when the learner references specific docs \
 or a GitHub link.
@@ -83,12 +79,6 @@ async def _execute_tutor_tool(name: str, args: dict) -> str:
             args.get("code", ""),
             args.get("language", "python"),
             args.get("focus", "general"),
-        )
-    elif name == "run_python":
-        result = await asyncio.to_thread(
-            _run_python,
-            args.get("code", ""),
-            args.get("timeout_seconds", 10),
         )
     elif name == "fetch_url":
         result = await _fetch_url(args.get("url", ""), args.get("max_chars", 4000))

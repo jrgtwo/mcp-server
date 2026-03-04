@@ -23,7 +23,6 @@ src/
     ├── agent.py        # Tool: run_agent (autonomous ReAct agent)
     ├── explain_code.py # Tool: explain_code (coding tutor)
     ├── review_code.py  # Tool: review_code  (coding tutor)
-    ├── run_python.py   # Tool: run_python   (coding tutor)
     └── coding_tutor.py # Tool: coding_tutor (orchestrating tutor agent)
 ```
 
@@ -372,7 +371,7 @@ Four tools that turn the server into an interactive programming tutor. The high-
 
 ### `coding_tutor`
 
-An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for teaching. It reasons step by step, calling `explain_code`, `review_code`, `run_python`, and `fetch_url` as needed, then produces a pedagogical answer.
+An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for teaching. It reasons step by step, calling `explain_code`, `review_code`, and `fetch_url` as needed, then produces a pedagogical answer.
 
 **Parameters**
 
@@ -434,29 +433,6 @@ Review a code snippet for issues. Outputs a structured report: overall impressio
 
 ---
 
-### `run_python`
-
-Execute a short Python snippet in a sandboxed subprocess and return its output.
-
-**Parameters**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `code` | `string` | *(required)* | The Python code to execute |
-| `timeout_seconds` | `int` | `10` | Maximum execution time in seconds (clamped to 1–30) |
-
-**Returns:** A string with `EXIT CODE`, `STDOUT`, and `STDERR` sections.
-
-**Security** — the following patterns are blocked and will never execute:
-
-| Blocked pattern | Reason |
-|---|---|
-| `import os`, `import sys`, `import subprocess`, `import socket`, `import shutil` | Filesystem / process / network access |
-| `__import__`, `importlib` | Dynamic import bypass |
-| `open(` | File I/O |
-| `exec(`, `eval(`, `compile(` | Arbitrary code execution |
-
----
 
 ## Resources
 
