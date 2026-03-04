@@ -1,15 +1,16 @@
 # MCP Local LLM Server
 
-A [FastMCP](https://github.com/jlowin/fastmcp) server that exposes a locally-hosted HuggingFace language model as MCP tools, plus a suite of utility tools for weather, news, web fetching, and more.
+A [FastMCP](https://github.com/jlowin/fastmcp) server that exposes a locally-hosted [llama.cpp](https://github.com/ggerganov/llama.cpp) language model as MCP tools, plus a suite of utility tools for weather, news, web fetching, PDF reading, and more.
 
 ## Overview
 
-This server lets any MCP-compatible client (e.g. Claude Desktop, Cursor) use a local HuggingFace model for text generation and chat, without sending data to an external API.
+This server lets any MCP-compatible client (e.g. Claude Desktop, Cursor) use a local GGUF model for text generation and chat, without sending data to an external API. The model is served by a `llama-server` subprocess; the MCP server communicates with it over a local HTTP port.
 
 ```
 src/
 ├── llm_server.py       # Entry point, argument parsing, server startup
-├── model.py            # Model loading, token generation, chat prompt building
+├── model.py            # llama-server lifecycle, token generation
+├── upload.py           # POST /upload endpoint for PDF file uploads
 ├── resources.py        # MCP resource: llm://info
 └── tools/
     ├── generate.py     # Tool: generate
@@ -18,6 +19,7 @@ src/
     ├── date_time.py    # Tool: get_datetime
     ├── fetch_url.py    # Tool: fetch_url
     ├── news.py         # Tool: news_headlines
+    ├── read_pdf.py     # Tool: read_pdf
     ├── agent.py        # Tool: run_agent (autonomous ReAct agent)
     ├── explain_code.py # Tool: explain_code (coding tutor)
     ├── review_code.py  # Tool: review_code  (coding tutor)
@@ -28,19 +30,14 @@ src/
 ## Requirements
 
 - Python 3.10+
-- A local HuggingFace model directory (e.g. `models/Qwen2.5-7B-Instruct`)
+- A `llama-server` binary from [llama.cpp](https://github.com/ggerganov/llama.cpp/releases)
+- A GGUF model file (e.g. `models/Qwen2.5-7B-Instruct-Q4_K_M.gguf`)
 - CUDA-capable GPU recommended for large models
 
 Install dependencies:
 
 ```bash
 pip install -r requirements.txt
-```
-
-For GPU support, install the CUDA build of PyTorch separately:
-
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu128
 ```
 
 On Windows, IANA timezone data is not bundled with Python. Install it for the `get_datetime` tool to support non-UTC timezones:
@@ -67,25 +64,64 @@ The server loads this file automatically on startup. Keys are never committed to
 
 ## Starting the Server
 
-### stdio transport (default — for MCP clients like Claude Desktop)
+### stdio transport (for MCP clients like Claude Desktop)
 
 ```bash
-python src/llm_server.py --model models/Qwen2.5-7B-Instruct
+python src/llm_server.py \
+  --model models/Qwen2.5-7B-Instruct-Q4_K_M.gguf \
+  --llama-server /path/to/llama-server
 ```
 
 ### HTTP transport (for network clients or testing with curl)
 
 ```bash
-python src/llm_server.py --model models/Qwen2.5-7B-Instruct --transport http --port 8000
+python src/llm_server.py \
+  --model models/Qwen2.5-7B-Instruct-Q4_K_M.gguf \
+  --llama-server /path/to/llama-server \
+  --transport http \
+  --port 8000
 ```
 
 **CLI flags**
 
 | Flag | Default | Description |
 |---|---|---|
-| `--model` | *(required)* | Path to local HuggingFace model directory |
+| `--model` | *(required)* | Path to a `.gguf` file, or a directory containing one |
+| `--llama-server` | *(required)* | Path to the `llama-server` executable |
 | `--transport` | `stdio` | `stdio` or `http` |
-| `--port` | `8000` | Port number (HTTP transport only) |
+| `--port` | `8000` | MCP server port (HTTP transport only) |
+| `--server-port` | `8080` | Port for the internal llama-server backend |
+| `--gpu-layers` | `-1` | Layers to offload to GPU; `-1` = all |
+| `--context-size` | `16384` | Total context window in tokens (prompt + output combined) |
+
+---
+
+## HTTP Endpoints
+
+These endpoints are only available when using `--transport http`.
+
+### `POST /upload`
+
+Upload a PDF file to the server and receive an `upload_id` to pass to `run_agent`.
+
+**Request:** `multipart/form-data` with a single field named `file`.
+
+**Response:**
+```json
+{
+  "upload_id": "3f8a1c...",
+  "filename": "report.pdf",
+  "size": 84210
+}
+```
+
+Uploaded files are stored in the `uploads/` folder at the project root and deleted when the server shuts down.
+
+**Example (curl):**
+```bash
+curl -X POST http://localhost:8000/upload \
+  -F "file=@/path/to/report.pdf"
+```
 
 ---
 
@@ -124,7 +160,7 @@ Generate text from a raw prompt using the local LLM. The input prompt is **not**
 
 ### `chat`
 
-Chat with the local LLM using a conversation history. Applies the model's built-in chat template (falls back to a plain `role: content` format if none is defined).
+Chat with the local LLM using a conversation history.
 
 **Parameters**
 
@@ -158,7 +194,7 @@ Chat with the local LLM using a conversation history. Applies the model's built-
 
 ### `run_agent`
 
-Run an autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent powered by the local LLM. The agent reasons step by step and calls tools as many times as needed before producing a final answer — no external API required.
+Run an autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent powered by the local LLM. The agent reasons step by step and calls tools as many times as needed before producing a final answer.
 
 **How it works**
 
@@ -180,9 +216,10 @@ FINAL answer returned
 |---|---|---|---|
 | `goal` | `string` | *(required)* | The task or question for the agent to solve |
 | `max_steps` | `int` | `10` | Maximum tool-call iterations before stopping |
-| `max_new_tokens` | `int` | `1024` | Token ceiling per LLM call. Tool-call steps stop well before this; it mainly affects the length of the final answer |
-| `max_history_pairs` | `int` | `4` | Number of recent assistant+tool rounds to keep in full. Older rounds are summarised and replaced to keep the prompt size manageable |
+| `max_new_tokens` | `int` | `4096` | Token ceiling per LLM call. Tool-call steps stop well before this; it mainly affects the length of the final answer |
+| `max_history_pairs` | `int` | `4` | Number of recent assistant+tool rounds to keep in full. Older rounds are summarised to keep the prompt size manageable |
 | `summary_strategy` | `string` | `"deterministic"` | How to summarise trimmed history. `"deterministic"` — fast, rule-based bullet points. `"llm"` — model-generated prose summary (adds an extra generation call) |
+| `upload_id` | `string` | `""` | ID returned by `POST /upload`. When provided, the PDF is read and injected into the agent's context before the loop starts |
 
 **Returns:** The agent's final answer as plain text.
 
@@ -195,210 +232,43 @@ FINAL answer returned
 | `get_weather` | Fetch current weather for any city |
 | `get_datetime` | Get the current date and time in any timezone |
 | `fetch_url` | Fetch and extract text from any URL |
-| `news_headlines` | Fetch the latest news headlines, using the user's location or subject of interest as the topic |
+| `news_headlines` | Fetch the latest news headlines by topic |
+| `read_pdf` | Extract text from a PDF file at a given path |
 
 **Examples**
 
-Single tool call:
 ```json
 {"goal": "What should I wear in Paris today?"}
 ```
 
-Multi-step (multiple tool calls):
 ```json
 {"goal": "Compare the weather in London and Tokyo, then tell me which city is warmer."}
 ```
 
 ```json
-{"goal": "What are the top US political news stories right now? Summarise the top 3."}
-```
-
-```json
-{"goal": "What time is it in Sydney right now, and what is the weather like there?"}
+{"goal": "Summarise this document", "upload_id": "3f8a1c..."}
 ```
 
 ---
 
-## Coding Tutor Tools
+### `read_pdf`
 
-Four tools that turn the server into an interactive programming tutor. The high-level entry point is `coding_tutor`; the three supporting tools (`explain_code`, `review_code`, `run_python`) can also be called directly.
-
-### `coding_tutor`
-
-An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for teaching. It reasons step by step, calling `explain_code`, `review_code`, `run_python`, and `fetch_url` as needed, then produces a pedagogical answer that explains the *why* before the *what*.
-
-**How it works**
-
-```
-Your question
-   ↓
-Tutor LLM decides: call a tool or answer?
-   ↓ (if tool)
-explain_code / review_code / run_python / fetch_url
-   → result fed back to LLM
-   ↓
-LLM decides again … (up to max_steps)
-   ↓
-FINAL teaching response
-```
+Extract and return the text content of a PDF file. Text is organised by page. Image-only (scanned) PDFs will return a clear message rather than empty output.
 
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `question` | `string` | *(required)* | Your coding question, code snippet, or error message |
-| `max_steps` | `int` | `8` | Maximum tool-call iterations before stopping |
-| `max_new_tokens` | `int` | `1024` | Token ceiling per LLM call |
-| `max_history_pairs` | `int` | `4` | Recent assistant+tool rounds to keep before older ones are summarised |
-| `summary_strategy` | `string` | `"deterministic"` | `"deterministic"` (fast bullet-point summary) or `"llm"` (model-generated prose) |
+| `file_path` | `string` | *(required)* | Absolute or relative path to the PDF file |
+| `max_chars` | `int` | `8000` | Maximum characters to return before truncating |
 
-**Returns:** A teaching response as plain text.
-
-**Examples**
-
-```json
-{"question": "Why does my list comprehension give the wrong result?\n\nmy_list = [1, 2, 3]\nresult = [x * 2 for x in my_list if x > 1]"}
-```
-
-```json
-{"question": "Explain the difference between a shallow copy and a deep copy in Python, with examples."}
-```
-
-```json
-{"question": "I'm getting a RecursionError in this code. What does it mean and how do I fix it?\n\ndef count_down(n):\n    return count_down(n - 1)"}
-```
-
-> **Tip:** The tutor infers your skill level from your question. Use plain language for beginner explanations, or technical terminology to get a more advanced response.
-
----
-
-### `explain_code`
-
-Explain a code snippet using the local LLM, tailored to the learner's skill level.
-
-**Parameters**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `code` | `string` | *(required)* | The source code to explain (capped at 6000 chars) |
-| `language` | `string` | `"python"` | Programming language of the snippet |
-| `level` | `string` | `"beginner"` | Explanation depth: `"beginner"`, `"intermediate"`, or `"advanced"` |
-| `max_new_tokens` | `int` | `768` | Maximum tokens for the explanation |
-
-**Level guidance**
-
-| Level | Audience |
-|---|---|
-| `beginner` | New to programming — plain language, analogies, first-principles explanations |
-| `intermediate` | Knows the basics — focuses on how/why, language patterns, idioms |
-| `advanced` | Experienced developer — design decisions, complexity, edge cases, subtle behaviour |
-
-**Returns:** A plain-text explanation of the code.
-
-**Examples**
-
-```json
-{
-  "code": "result = [x**2 for x in range(10) if x % 2 == 0]",
-  "level": "beginner"
-}
-```
-
-```json
-{
-  "code": "with open('data.csv') as f:\n    reader = csv.DictReader(f)\n    rows = list(reader)",
-  "language": "python",
-  "level": "intermediate"
-}
-```
-
----
-
-### `review_code`
-
-Review a code snippet for issues using the local LLM. Outputs a structured report: overall impression, numbered issues with severity, positives, and a top recommendation.
-
-**Parameters**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `code` | `string` | *(required)* | The source code to review (capped at 6000 chars) |
-| `language` | `string` | `"python"` | Programming language of the snippet |
-| `focus` | `string` | `"general"` | Review focus: `"general"`, `"security"`, `"performance"`, or `"style"` |
-| `max_new_tokens` | `int` | `768` | Maximum tokens for the review |
-
-**Focus options**
-
-| Focus | What it checks |
-|---|---|
-| `general` | Bugs, logic errors, bad practices, readability |
-| `security` | Injection risks, insecure data handling, auth flaws, secrets in code |
-| `performance` | Algorithmic complexity, unnecessary allocations, blocking calls, caching |
-| `style` | Naming, function length, duplication, idiomatic patterns, comments |
-
-**Returns:** A structured review with four sections: *Overall Impression*, *Issues Found* (numbered, each with severity, location, description, and fix), *Positives*, and *Top Recommendation*.
+**Returns:** Extracted text organised by page, truncated to `max_chars` if needed.
 
 **Example**
 
 ```json
-{
-  "code": "def get_user(id):\n    query = f\"SELECT * FROM users WHERE id = {id}\"\n    return db.execute(query)",
-  "focus": "security"
-}
+{"file_path": "C:/Users/jonat/Documents/report.pdf", "max_chars": 10000}
 ```
-
----
-
-### `run_python`
-
-Execute a short Python snippet in a sandboxed subprocess and return its output. Designed for live demos during tutoring sessions — dangerous operations are blocked before execution.
-
-**Parameters**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `code` | `string` | *(required)* | The Python code to execute |
-| `timeout_seconds` | `int` | `10` | Maximum execution time in seconds (clamped to 1–30) |
-
-**Returns:** A string with three sections:
-
-```
-EXIT CODE: 0
-STDOUT:
-4
-
-STDERR:
-
-```
-
-**Security**
-
-The following patterns are blocked and will never execute:
-
-| Blocked pattern | Reason |
-|---|---|
-| `import os`, `import sys`, `import subprocess`, `import socket`, `import shutil` | Filesystem / process / network access |
-| `__import__`, `importlib` | Dynamic import bypass |
-| `open(` | File I/O |
-| `exec(`, `eval(`, `compile(` | Arbitrary code execution |
-
-Blocked code returns a clear message identifying the pattern — nothing is executed.
-
-**Examples**
-
-```json
-{"code": "print(2 + 2)"}
-```
-→ `EXIT CODE: 0\nSTDOUT:\n4\nSTDERR:\n`
-
-```json
-{"code": "for i in range(5):\n    print(i ** 2)"}
-```
-
-```json
-{"code": "import os; os.listdir('.')"}
-```
-→ `Execution blocked: the pattern 'import os' is not permitted for safety reasons.`
 
 ---
 
@@ -460,7 +330,7 @@ Fetch the content of any URL and return it as plain text. HTML pages are strippe
 | `url` | `string` | *(required)* | URL to fetch (must start with `http://` or `https://`) |
 | `max_chars` | `int` | `4000` | Maximum characters to return before truncating |
 
-**Returns:** Extracted page text, truncated to `max_chars` if needed.
+**Returns:** Extracted page text, truncated to `max_chars` if needed. Returns a descriptive error string if the connection fails (e.g. SSL error, timeout, HTTP error) rather than raising an exception.
 
 **Example**
 
@@ -496,20 +366,103 @@ Fetch the latest news headlines, optionally filtered by a topic keyword. Require
 
 ---
 
+## Coding Tutor Tools
+
+Four tools that turn the server into an interactive programming tutor. The high-level entry point is `coding_tutor`; the three supporting tools (`explain_code`, `review_code`, `run_python`) can also be called directly.
+
+### `coding_tutor`
+
+An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for teaching. It reasons step by step, calling `explain_code`, `review_code`, `run_python`, and `fetch_url` as needed, then produces a pedagogical answer.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `question` | `string` | *(required)* | Your coding question, code snippet, or error message |
+| `max_steps` | `int` | `8` | Maximum tool-call iterations before stopping |
+| `max_new_tokens` | `int` | `1024` | Token ceiling per LLM call |
+| `max_history_pairs` | `int` | `4` | Recent assistant+tool rounds to keep before older ones are summarised |
+| `summary_strategy` | `string` | `"deterministic"` | `"deterministic"` (fast bullet-point summary) or `"llm"` (model-generated prose) |
+
+**Returns:** A teaching response as plain text.
+
+**Examples**
+
+```json
+{"question": "Why does my list comprehension give the wrong result?\n\nmy_list = [1, 2, 3]\nresult = [x * 2 for x in my_list if x > 1]"}
+```
+
+```json
+{"question": "Explain the difference between a shallow copy and a deep copy in Python, with examples."}
+```
+
+> **Tip:** The tutor infers your skill level from your question. Use plain language for beginner explanations, or technical terminology to get a more advanced response.
+
+---
+
+### `explain_code`
+
+Explain a code snippet using the local LLM, tailored to the learner's skill level.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `code` | `string` | *(required)* | The source code to explain (capped at 6000 chars) |
+| `language` | `string` | `"python"` | Programming language of the snippet |
+| `level` | `string` | `"beginner"` | Explanation depth: `"beginner"`, `"intermediate"`, or `"advanced"` |
+| `max_new_tokens` | `int` | `768` | Maximum tokens for the explanation |
+
+**Returns:** A plain-text explanation of the code.
+
+---
+
+### `review_code`
+
+Review a code snippet for issues. Outputs a structured report: overall impression, numbered issues with severity, positives, and a top recommendation.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `code` | `string` | *(required)* | The source code to review (capped at 6000 chars) |
+| `language` | `string` | `"python"` | Programming language of the snippet |
+| `focus` | `string` | `"general"` | Review focus: `"general"`, `"security"`, `"performance"`, or `"style"` |
+| `max_new_tokens` | `int` | `768` | Maximum tokens for the review |
+
+**Returns:** A structured review with four sections: *Overall Impression*, *Issues Found*, *Positives*, and *Top Recommendation*.
+
+---
+
+### `run_python`
+
+Execute a short Python snippet in a sandboxed subprocess and return its output.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `code` | `string` | *(required)* | The Python code to execute |
+| `timeout_seconds` | `int` | `10` | Maximum execution time in seconds (clamped to 1–30) |
+
+**Returns:** A string with `EXIT CODE`, `STDOUT`, and `STDERR` sections.
+
+**Security** — the following patterns are blocked and will never execute:
+
+| Blocked pattern | Reason |
+|---|---|
+| `import os`, `import sys`, `import subprocess`, `import socket`, `import shutil` | Filesystem / process / network access |
+| `__import__`, `importlib` | Dynamic import bypass |
+| `open(` | File I/O |
+| `exec(`, `eval(`, `compile(` | Arbitrary code execution |
+
+---
+
 ## Resources
 
 ### `llm://info`
 
 Returns metadata about the currently loaded model.
-
-**Example output**
-
-```
-path:       models/Qwen2.5-7B-Instruct
-device:     cuda
-dtype:      torch.float16
-parameters: 7.62B
-```
 
 ---
 
@@ -522,7 +475,11 @@ Add the server to your `claude_desktop_config.json`:
   "mcpServers": {
     "local-llm": {
       "command": "python",
-      "args": ["src/llm_server.py", "--model", "models/Qwen2.5-7B-Instruct"],
+      "args": [
+        "src/llm_server.py",
+        "--model", "models/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        "--llama-server", "/path/to/llama-server"
+      ],
       "cwd": "/absolute/path/to/mcp-server"
     }
   }
@@ -531,6 +488,8 @@ Add the server to your `claude_desktop_config.json`:
 
 ## Notes
 
-- The model is loaded once at startup and held in memory for the lifetime of the server.
-- GPU (CUDA) is used automatically if available; otherwise the model runs on CPU (slower).
+- The model is loaded once at startup via `llama-server` and held in memory for the lifetime of the server.
+- GPU offloading is controlled by `--gpu-layers`; `-1` offloads all layers.
+- `--context-size` sets the total token budget shared between the prompt and generated output. Increase it if you experience truncation on long responses.
 - The HTTP transport enables CORS for all origins — restrict `allow_origins` before exposing beyond localhost.
+- Uploaded PDFs (`POST /upload`) are stored in `uploads/` at the project root and automatically deleted on server shutdown.

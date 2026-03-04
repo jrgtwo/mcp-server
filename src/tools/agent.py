@@ -10,6 +10,7 @@ from fastmcp import FastMCP
 from model import _log, generate_tokens
 from tools.date_time import _get_datetime
 from tools.fetch_url import _fetch_url
+from tools.read_pdf import _read_pdf
 from tools.news import _news_headlines
 from tools.weather import _fetch_weather
 
@@ -26,6 +27,8 @@ TOOLS AVAILABLE:
     Return the current date and time. timezone: IANA name e.g. "America/New_York".
 - fetch_url(url: str, max_chars: int = 4000) -> str
     Fetch and return the text content of a specific URL. Use this whenever the user provides a URL or asks about a specific website.
+- read_pdf(file_path: str, max_chars: int = 8000) -> str
+    Extract and return the text from a PDF file given its path. Use this when the user provides a path to a PDF file.
 - news_headlines(topic: str = "", country: str = "us", max_results: int = 5) -> str
     Search for the latest news headlines by topic. Use this when the user asks for news about a subject or location but has NOT provided a specific URL. Set topic to the user's location or subject of interest (e.g. "Solvang", "Santa Barbara"). Leave blank for general top headlines.
 
@@ -181,6 +184,8 @@ async def _execute_tool(name: str, args: dict) -> str:
         result = _get_datetime(args.get("timezone", "UTC"))
     elif name == "fetch_url":
         result = await _fetch_url(args.get("url", ""), args.get("max_chars", 4000))
+    elif name == "read_pdf":
+        result = await _read_pdf(args.get("file_path", ""), args.get("max_chars", 8000))
     elif name == "news_headlines":
         result = await _news_headlines(
             args.get("topic", ""),

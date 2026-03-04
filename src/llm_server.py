@@ -19,7 +19,9 @@ Resources:
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
@@ -29,6 +31,17 @@ from model import _log, lifespan, state
 load_dotenv()
 import resources
 import tools
+import upload
+
+
+@asynccontextmanager
+async def _lifespan(server):
+    async with lifespan(server):
+        yield
+    # Delete uploaded files on shutdown
+    if upload.UPLOAD_DIR.exists():
+        shutil.rmtree(upload.UPLOAD_DIR)
+        _log("[upload] Upload directory removed on shutdown.")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -68,9 +81,10 @@ if __name__ == "__main__":
     state.n_gpu_layers = args.gpu_layers
     state.n_ctx = args.context_size
 
-    mcp = FastMCP("local-llm", lifespan=lifespan)
+    mcp = FastMCP("local-llm", lifespan=_lifespan)
     tools.register_all(mcp)
     resources.register(mcp)
+    upload.register(mcp)
 
     if args.transport == "http":
         from starlette.middleware import Middleware

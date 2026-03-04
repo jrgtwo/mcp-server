@@ -7,6 +7,9 @@ httpx
 # HTML parsing (fetch_url)
 beautifulsoup4
 
+# PDF text extraction (read_pdf)
+pypdf
+
 # ML — install the CUDA variant manually if needed:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu128
 torch

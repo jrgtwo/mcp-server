@@ -36,3 +36,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Uploaded files (managed at runtime, deleted on shutdown)
+uploads/
