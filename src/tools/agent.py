@@ -76,7 +76,13 @@ def _parse_action(text: str) -> tuple[str, dict] | tuple[str, str] | tuple[None,
 
     m = _FINAL_RE.search(text)
     if m:
-        return "FINAL", m.group(1).strip()
+        answer = m.group(1)
+        # Truncate at any hallucinated conversation continuation
+        for marker in ("\n[USER]", "\n[ASSISTANT]"):
+            idx = answer.find(marker)
+            if idx != -1:
+                answer = answer[:idx]
+        return "FINAL", answer.strip()
 
     return None, None
 
@@ -215,7 +221,7 @@ def register(mcp: FastMCP) -> None:
     async def run_agent(
         goal: str,
         max_steps: int = 10,
-        max_new_tokens: int = 1024,
+        max_new_tokens: int = 4096,
         max_history_pairs: int = 4,
         summary_strategy: str = "deterministic",
     ) -> str:
@@ -230,7 +236,7 @@ def register(mcp: FastMCP) -> None:
         Args:
             goal:               The task or question for the agent to solve.
             max_steps:          Maximum tool-call iterations before stopping (default 10).
-            max_new_tokens:     Token ceiling for each LLM call (default 2048). Tool-call
+            max_new_tokens:     Token ceiling for each LLM call (default 4096). Tool-call
                                 steps stop well before this; it mainly affects the length
                                 of the final answer.
             max_history_pairs:  Number of recent assistant+tool rounds to keep in

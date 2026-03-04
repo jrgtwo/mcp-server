@@ -54,8 +54,8 @@ def _parse_args() -> argparse.Namespace:
         help="Number of model layers to offload to GPU; -1 = all (default: -1)",
     )
     parser.add_argument(
-        "--context-size", type=int, default=4096,
-        help="Context window size in tokens (default: 4096)",
+        "--context-size", type=int, default=16384,
+        help="Context window size in tokens (default: 16384)",
     )
     return parser.parse_args()
 

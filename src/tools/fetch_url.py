@@ -28,9 +28,19 @@ async def _fetch_url(url: str, max_chars: int = 4000) -> str:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     }
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        resp = await client.get(url, headers=headers)
-        resp.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+    except httpx.ConnectError as exc:
+        _log(f"[fetch_url] Connection error: {exc}")
+        return f"Could not connect to '{url}': {exc}"
+    except httpx.HTTPStatusError as exc:
+        _log(f"[fetch_url] HTTP error: {exc}")
+        return f"HTTP {exc.response.status_code} error fetching '{url}'."
+    except httpx.TimeoutException:
+        _log(f"[fetch_url] Request timed out.")
+        return f"Request to '{url}' timed out."
 
     content_type = resp.headers.get("content-type", "")
     raw_len = len(resp.text)

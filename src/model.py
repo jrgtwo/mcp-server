@@ -19,7 +19,7 @@ class ModelState:
     client: httpx.Client | None = None
     model_path: str = ""
     n_gpu_layers: int = -1
-    n_ctx: int = 4096
+    n_ctx: int = 16384
     server_bin: str = ""
     server_port: int = 8080
 
