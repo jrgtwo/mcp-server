@@ -53,7 +53,8 @@ def _parse_args() -> argparse.Namespace:
         choices=["stdio", "http"],
         help="Transport to use (default: stdio)",
     )
-    parser.add_argument("--port", type=int, default=8000, help="Port for MCP HTTP transport")
+    parser.add_argument("--port", type=int, default=5174, help="Port for MCP HTTP transport")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind for HTTP transport (default: 0.0.0.0)")
     parser.add_argument(
         "--llama-server", required=True,
         help="Path to llama-server executable",
@@ -90,9 +91,10 @@ if __name__ == "__main__":
         from starlette.middleware import Middleware
         from starlette.middleware.cors import CORSMiddleware
 
-        _log(f"Starting HTTP transport on port {args.port}.")
+        _log(f"Starting HTTP transport on {args.host}:{args.port}.")
         mcp.run(
             "http",
+            host=args.host,
             port=args.port,
             show_banner=False,
             middleware=[

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from . import agent, chat, coding_tutor, date_time, explain_code, fetch_url, generate, news, read_pdf, review_code, weather
+from . import agent, chat, coding_tutor, date_time, explain_code, fetch_url, generate, news, read_markdown, read_pdf, review_code, weather
 
 
 def register_all(mcp: FastMCP) -> None:
@@ -13,6 +13,7 @@ def register_all(mcp: FastMCP) -> None:
     fetch_url.register(mcp)
     news.register(mcp)
     read_pdf.register(mcp)
+    read_markdown.register(mcp)
     agent.register(mcp)
     # Coding tutor tools
     explain_code.register(mcp)

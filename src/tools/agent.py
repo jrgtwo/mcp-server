@@ -11,6 +11,7 @@ from model import _log, generate_tokens
 from tools.date_time import _get_datetime
 from tools.fetch_url import _fetch_url
 from tools.read_pdf import _read_pdf
+from tools.read_markdown import _read_markdown
 from tools.news import _news_headlines
 from tools.weather import _fetch_weather
 
@@ -29,6 +30,8 @@ TOOLS AVAILABLE:
     Fetch and return the text content of a specific URL. Use this whenever the user provides a URL or asks about a specific website.
 - read_pdf(file_path: str, max_chars: int = 8000) -> str
     Extract and return the text from a PDF file given its path. Use this when the user provides a path to a PDF file.
+- read_markdown(file_path: str, max_chars: int = 8000) -> str
+    Read and return the contents of a Markdown (.md) file given its path. Use this when the user provides a path to a Markdown file.
 - news_headlines(topic: str = "", country: str = "us", max_results: int = 5) -> str
     Search for the latest news headlines by topic. Use this when the user asks for news about a subject or location but has NOT provided a specific URL. Set topic to the user's location or subject of interest (e.g. "Solvang", "Santa Barbara"). Leave blank for general top headlines.
 
@@ -186,6 +189,8 @@ async def _execute_tool(name: str, args: dict) -> str:
         result = await _fetch_url(args.get("url", ""), args.get("max_chars", 4000))
     elif name == "read_pdf":
         result = await _read_pdf(args.get("file_path", ""), args.get("max_chars", 8000))
+    elif name == "read_markdown":
+        result = await _read_markdown(args.get("file_path", ""), args.get("max_chars", 8000))
     elif name == "news_headlines":
         result = await _news_headlines(
             args.get("topic", ""),

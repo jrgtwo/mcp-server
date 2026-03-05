@@ -27,9 +27,10 @@ def register(mcp: FastMCP) -> None:
     @mcp.custom_route("/upload", methods=["POST"])
     async def upload_pdf(request: Request) -> JSONResponse:
         """
-        Upload a PDF file and receive an upload_id to pass to run_agent.
+        Upload a PDF or Markdown file and receive an upload_id to pass to run_agent.
 
         Accepts multipart/form-data with a single field named 'file'.
+        Supported types: .pdf, .md, .markdown
         Returns: {"upload_id": "<id>", "filename": "<original name>", "size": <bytes>}
         """
         content_type = request.headers.get("content-type", "")
@@ -47,14 +48,21 @@ def register(mcp: FastMCP) -> None:
                 status_code=400,
             )
 
-        filename: str = getattr(file, "filename", None) or "upload.pdf"
+        filename: str = getattr(file, "filename", None) or "upload.bin"
         data: bytes = await file.read()
 
         if not data:
             return JSONResponse({"error": "Uploaded file is empty"}, status_code=400)
 
+        suffix = Path(filename).suffix.lower()
+        if suffix not in {".pdf", ".md", ".markdown"}:
+            return JSONResponse(
+                {"error": f"Unsupported file type '{suffix}'. Supported: .pdf, .md, .markdown"},
+                status_code=415,
+            )
+
         upload_id = uuid.uuid4().hex
-        dest = UPLOAD_DIR / f"{upload_id}.pdf"
+        dest = UPLOAD_DIR / f"{upload_id}{suffix}"
         dest.write_bytes(data)
 
         _uploads[upload_id] = str(dest)
