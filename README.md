@@ -10,7 +10,7 @@ This server lets any MCP-compatible client (e.g. Claude Desktop, Cursor) use a l
 src/
 ├── llm_server.py       # Entry point, argument parsing, server startup
 ├── model.py            # llama-server lifecycle, token generation
-├── upload.py           # POST /upload endpoint for PDF file uploads
+├── upload.py           # POST /upload endpoint for PDF and Markdown file uploads
 ├── resources.py        # MCP resource: llm://info
 └── tools/
     ├── generate.py     # Tool: generate
@@ -20,6 +20,7 @@ src/
     ├── fetch_url.py    # Tool: fetch_url
     ├── news.py         # Tool: news_headlines
     ├── read_pdf.py     # Tool: read_pdf
+    ├── read_markdown.py # Tool: read_markdown
     ├── agent.py        # Tool: run_agent (autonomous ReAct agent)
     ├── explain_code.py # Tool: explain_code (coding tutor)
     ├── review_code.py  # Tool: review_code  (coding tutor)
@@ -78,7 +79,7 @@ python src/llm_server.py \
   --model models/Qwen2.5-7B-Instruct-Q4_K_M.gguf \
   --llama-server /path/to/llama-server \
   --transport http \
-  --port 8000
+  --port 5174
 ```
 
 **CLI flags**
@@ -88,7 +89,8 @@ python src/llm_server.py \
 | `--model` | *(required)* | Path to a `.gguf` file, or a directory containing one |
 | `--llama-server` | *(required)* | Path to the `llama-server` executable |
 | `--transport` | `stdio` | `stdio` or `http` |
-| `--port` | `8000` | MCP server port (HTTP transport only) |
+| `--host` | `0.0.0.0` | Host to bind for HTTP transport (use `127.0.0.1` to restrict to localhost) |
+| `--port` | `5174` | MCP server port (HTTP transport only) |
 | `--server-port` | `8080` | Port for the internal llama-server backend |
 | `--gpu-layers` | `-1` | Layers to offload to GPU; `-1` = all |
 | `--context-size` | `16384` | Total context window in tokens (prompt + output combined) |
@@ -101,7 +103,9 @@ These endpoints are only available when using `--transport http`.
 
 ### `POST /upload`
 
-Upload a PDF file to the server and receive an `upload_id` to pass to `run_agent`.
+Upload a PDF or Markdown file to the server and receive an `upload_id` to pass to `run_agent`.
+
+**Supported types:** `.pdf`, `.md`, `.markdown`
 
 **Request:** `multipart/form-data` with a single field named `file`.
 
@@ -118,8 +122,11 @@ Uploaded files are stored in the `uploads/` folder at the project root and delet
 
 **Example (curl):**
 ```bash
-curl -X POST http://localhost:8000/upload \
+curl -X POST http://localhost:5174/upload \
   -F "file=@/path/to/report.pdf"
+
+curl -X POST http://localhost:5174/upload \
+  -F "file=@/path/to/notes.md"
 ```
 
 ---
@@ -233,6 +240,7 @@ FINAL answer returned
 | `fetch_url` | Fetch and extract text from any URL |
 | `news_headlines` | Fetch the latest news headlines by topic |
 | `read_pdf` | Extract text from a PDF file at a given path |
+| `read_markdown` | Read the contents of a Markdown file at a given path |
 
 **Examples**
 
@@ -267,6 +275,27 @@ Extract and return the text content of a PDF file. Text is organised by page. Im
 
 ```json
 {"file_path": "C:/Users/jonat/Documents/report.pdf", "max_chars": 10000}
+```
+
+---
+
+### `read_markdown`
+
+Read and return the contents of a Markdown file.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `file_path` | `string` | *(required)* | Absolute or relative path to the `.md` or `.markdown` file |
+| `max_chars` | `int` | `8000` | Maximum characters to return before truncating |
+
+**Returns:** The file's text content, truncated to `max_chars` if needed.
+
+**Example**
+
+```json
+{"file_path": "C:/Users/jonat/Documents/notes.md", "max_chars": 5000}
 ```
 
 ---
@@ -367,7 +396,7 @@ Fetch the latest news headlines, optionally filtered by a topic keyword. Require
 
 ## Coding Tutor Tools
 
-Four tools that turn the server into an interactive programming tutor. The high-level entry point is `coding_tutor`; the three supporting tools (`explain_code`, `review_code`, `run_python`) can also be called directly.
+Three tools that turn the server into an interactive programming tutor. The high-level entry point is `coding_tutor`; the two supporting tools (`explain_code`, `review_code`) can also be called directly.
 
 ### `coding_tutor`
 
@@ -467,5 +496,5 @@ Add the server to your `claude_desktop_config.json`:
 - The model is loaded once at startup via `llama-server` and held in memory for the lifetime of the server.
 - GPU offloading is controlled by `--gpu-layers`; `-1` offloads all layers.
 - `--context-size` sets the total token budget shared between the prompt and generated output. Increase it if you experience truncation on long responses.
-- The HTTP transport enables CORS for all origins — restrict `allow_origins` before exposing beyond localhost.
-- Uploaded PDFs (`POST /upload`) are stored in `uploads/` at the project root and automatically deleted on server shutdown.
+- The HTTP transport binds to `0.0.0.0` by default, making it accessible from other machines on the network. Use `--host 127.0.0.1` to restrict to localhost. CORS is enabled for all origins — restrict `allow_origins` before exposing to untrusted networks.
+- Uploaded files (`POST /upload`) are stored in `uploads/` at the project root and automatically deleted on server shutdown.

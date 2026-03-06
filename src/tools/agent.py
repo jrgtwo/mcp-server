@@ -7,6 +7,7 @@ import time
 
 from fastmcp import FastMCP
 
+import upload
 from model import _log, generate_tokens
 from tools.date_time import _get_datetime
 from tools.fetch_url import _fetch_url
@@ -234,6 +235,7 @@ def register(mcp: FastMCP) -> None:
         max_new_tokens: int = 4096,
         max_history_pairs: int = 4,
         summary_strategy: str = "deterministic",
+        upload_id: str = "",
     ) -> str:
         """
         Run an autonomous ReAct agent to accomplish a multi-step goal.
@@ -256,15 +258,32 @@ def register(mcp: FastMCP) -> None:
                                     points extracted from each tool call and result.
                                   "llm" — uses the model to write a prose summary;
                                     more natural but adds an extra generation call.
+            upload_id:          ID returned by POST /upload. When provided, the file
+                                contents are injected into the agent's context before
+                                the loop starts.
 
         Returns:
             The agent's final answer, or a partial trace if max_steps is reached.
         """
         _log(f'[agent] Starting — goal: "{goal}"')
 
+        user_content = goal
+        if upload_id:
+            file_path = upload.resolve(upload_id)
+            if file_path is None:
+                return f"Unknown upload_id '{upload_id}'. Please upload a file first via POST /upload."
+            from pathlib import Path
+            suffix = Path(file_path).suffix.lower()
+            if suffix == ".pdf":
+                file_content = await _read_pdf(file_path)
+            else:
+                file_content = await _read_markdown(file_path)
+            user_content = f"[Uploaded file content]\n{file_content}\n\n[Goal]\n{goal}"
+            _log(f"[agent] Injected upload '{upload_id}' ({len(file_content)} chars) into context.")
+
         messages: list[dict[str, str]] = [
             {"role": "system",  "content": _SYSTEM_PROMPT},
-            {"role": "user",    "content": goal},
+            {"role": "user",    "content": user_content},
         ]
 
         for step in range(max_steps):
