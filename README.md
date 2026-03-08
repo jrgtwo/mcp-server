@@ -498,3 +498,7 @@ Add the server to your `claude_desktop_config.json`:
 - `--context-size` sets the total token budget shared between the prompt and generated output. Increase it if you experience truncation on long responses.
 - The HTTP transport binds to `0.0.0.0` by default, making it accessible from other machines on the network. Use `--host 127.0.0.1` to restrict to localhost. CORS is enabled for all origins — restrict `allow_origins` before exposing to untrusted networks.
 - Uploaded files (`POST /upload`) are stored in `uploads/` at the project root and automatically deleted on server shutdown.
+
+
+### Running local llama server to connect with opencode
+`llama-server --model /path/to/model.gguf --port 8000 --host 127.0.0.1 --n-gpu-layers -1 --ctx-size 16384 --no-mmap`
