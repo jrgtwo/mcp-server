@@ -20,3 +20,6 @@ accelerate
 
 # HTTP transport (starlette CORS middleware)
 starlette
+
+# Stock price data (get_stock_price tool)
+yfinance

@@ -1,6 +1,6 @@
 # MCP Local LLM Server
 
-A [FastMCP](https://github.com/jlowin/fastmcp) server that exposes a locally-hosted [llama.cpp](https://github.com/ggerganov/llama.cpp) language model as MCP tools, plus a suite of utility tools for weather, news, web fetching, PDF reading, and more.
+A [FastMCP](https://github.com/jlowin/fastmcp) server that exposes a locally-hosted [llama.cpp](https://github.com/ggerganov/llama.cpp) language model as MCP tools, plus a suite of utility tools for weather, news, web fetching, file I/O, stock data, summarization, and more.
 
 ## Overview
 
@@ -8,24 +8,29 @@ This server lets any MCP-compatible client (e.g. Claude Desktop, Cursor) use a l
 
 ```
 src/
-├── llm_server.py       # Entry point, argument parsing, server startup
-├── model.py            # llama-server lifecycle, token generation
-├── upload.py           # POST /upload endpoint for PDF and Markdown file uploads
-├── resources.py        # MCP resource: llm://info
+├── llm_server.py        # Entry point, argument parsing, server startup
+├── model.py             # llama-server lifecycle, token generation
+├── upload.py            # POST /upload endpoint for PDF and Markdown file uploads
+├── resources.py         # MCP resource: llm://info
 └── tools/
-    ├── generate.py     # Tool: generate
-    ├── chat.py         # Tool: chat
-    ├── weather.py      # Tool: get_weather
-    ├── date_time.py    # Tool: get_datetime
-    ├── fetch_url.py    # Tool: fetch_url
-    ├── news.py         # Tool: news_headlines
-    ├── read_pdf.py     # Tool: read_pdf
+    ├── generate.py      # Tool: generate
+    ├── chat.py          # Tool: chat
+    ├── weather.py       # Tool: get_weather
+    ├── date_time.py     # Tool: get_datetime
+    ├── fetch_url.py     # Tool: fetch_url
+    ├── news.py          # Tool: news_headlines
+    ├── read_pdf.py      # Tool: read_pdf
     ├── read_markdown.py # Tool: read_markdown
-    ├── agent.py        # Tool: run_agent (autonomous ReAct agent)
-    ├── explain_code.py # Tool: explain_code (coding tutor)
-    ├── review_code.py  # Tool: review_code  (coding tutor)
-    └── coding_tutor.py # Tool: coding_tutor (orchestrating tutor agent)
+    ├── create_file.py   # Tool: create_file
+    ├── stock_price.py   # Tool: get_stock_price
+    ├── summarize.py     # Tool: summarize_text
+    ├── agent.py         # Tool: run_agent (autonomous ReAct agent)
+    ├── explain_code.py  # Tool: explain_code (coding tutor)
+    ├── review_code.py   # Tool: review_code  (coding tutor)
+    └── coding_tutor.py  # Tool: coding_tutor (orchestrating tutor agent)
 ```
+
+---
 
 ## Requirements
 
@@ -46,19 +51,23 @@ On Windows, IANA timezone data is not bundled with Python. Install it for the `g
 pip install tzdata
 ```
 
+---
+
 ## Configuration
 
-Some tools require API keys. Create a `.env` file in the project root (it is already gitignored):
+Some tools require API keys. Create a `.env` file in the project root (already gitignored):
 
 ```
 NEWSAPI_KEY=your_key_here
 ```
 
-The server loads this file automatically on startup. Keys are never committed to version control.
+The server loads this file automatically on startup.
 
 | Variable | Required by | Where to get it |
 |---|---|---|
 | `NEWSAPI_KEY` | `news_headlines` | [newsapi.org](https://newsapi.org) — free tier available |
+
+All other tools work without any API key.
 
 ---
 
@@ -82,14 +91,14 @@ python src/llm_server.py \
   --port 5174
 ```
 
-**CLI flags**
+### CLI flags
 
 | Flag | Default | Description |
 |---|---|---|
 | `--model` | *(required)* | Path to a `.gguf` file, or a directory containing one |
 | `--llama-server` | *(required)* | Path to the `llama-server` executable |
 | `--transport` | `stdio` | `stdio` or `http` |
-| `--host` | `0.0.0.0` | Host to bind for HTTP transport (use `127.0.0.1` to restrict to localhost) |
+| `--host` | `0.0.0.0` | Host to bind for HTTP transport (use `127.0.0.1` for localhost only) |
 | `--port` | `5174` | MCP server port (HTTP transport only) |
 | `--server-port` | `8080` | Port for the internal llama-server backend |
 | `--gpu-layers` | `-1` | Layers to offload to GPU; `-1` = all |
@@ -118,9 +127,9 @@ Upload a PDF or Markdown file to the server and receive an `upload_id` to pass t
 }
 ```
 
-Uploaded files are stored in the `uploads/` folder at the project root and deleted when the server shuts down.
+Uploaded files are stored in `uploads/` at the project root and deleted when the server shuts down.
 
-**Example (curl):**
+**Example:**
 ```bash
 curl -X POST http://localhost:5174/upload \
   -F "file=@/path/to/report.pdf"
@@ -135,7 +144,7 @@ curl -X POST http://localhost:5174/upload \
 
 ### `generate`
 
-Generate text from a raw prompt using the local LLM. The input prompt is **not** included in the returned text.
+Generate text from a raw prompt. The input prompt is **not** included in the returned text.
 
 **Parameters**
 
@@ -189,113 +198,11 @@ Chat with the local LLM using a conversation history.
 {
   "messages": [
     {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "What is the Eiffel Tower?"}
+    {"role": "user",   "content": "What is the Eiffel Tower?"}
   ],
   "temperature": 0.7,
   "max_new_tokens": 256
 }
-```
-
----
-
-### `run_agent`
-
-Run an autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent powered by the local LLM. The agent reasons step by step and calls tools as many times as needed before producing a final answer.
-
-**How it works**
-
-```
-User goal
-   ↓
-LLM decides: call a tool or answer?
-   ↓ (if tool)
-Tool executes → result fed back to LLM
-   ↓
-LLM decides again … (repeats up to max_steps)
-   ↓ (when done)
-FINAL answer returned
-```
-
-**Parameters**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `goal` | `string` | *(required)* | The task or question for the agent to solve |
-| `max_steps` | `int` | `10` | Maximum tool-call iterations before stopping |
-| `max_new_tokens` | `int` | `4096` | Token ceiling per LLM call. Tool-call steps stop well before this; it mainly affects the length of the final answer |
-| `max_history_pairs` | `int` | `4` | Number of recent assistant+tool rounds to keep in full. Older rounds are summarised to keep the prompt size manageable |
-| `summary_strategy` | `string` | `"deterministic"` | How to summarise trimmed history. `"deterministic"` — fast, rule-based bullet points. `"llm"` — model-generated prose summary (adds an extra generation call) |
-| `upload_id` | `string` | `""` | ID returned by `POST /upload`. When provided, the PDF is read and injected into the agent's context before the loop starts |
-
-**Returns:** The agent's final answer as plain text.
-
-> **Note:** If you see `Max steps (N) reached without a FINAL answer`, the agent used all its iterations without concluding. Either the task needs more steps (increase `max_steps`) or the model looped on tool calls — check the step logs to diagnose.
-
-**Tools available to the agent**
-
-| Tool | Description |
-|---|---|
-| `get_weather` | Fetch current weather for any city |
-| `get_datetime` | Get the current date and time in any timezone |
-| `fetch_url` | Fetch and extract text from any URL |
-| `news_headlines` | Fetch the latest news headlines by topic |
-| `read_pdf` | Extract text from a PDF file at a given path |
-| `read_markdown` | Read the contents of a Markdown file at a given path |
-
-**Examples**
-
-```json
-{"goal": "What should I wear in Paris today?"}
-```
-
-```json
-{"goal": "Compare the weather in London and Tokyo, then tell me which city is warmer."}
-```
-
-```json
-{"goal": "Summarise this document", "upload_id": "3f8a1c..."}
-```
-
----
-
-### `read_pdf`
-
-Extract and return the text content of a PDF file. Text is organised by page. Image-only (scanned) PDFs will return a clear message rather than empty output.
-
-**Parameters**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `file_path` | `string` | *(required)* | Absolute or relative path to the PDF file |
-| `max_chars` | `int` | `8000` | Maximum characters to return before truncating |
-
-**Returns:** Extracted text organised by page, truncated to `max_chars` if needed.
-
-**Example**
-
-```json
-{"file_path": "C:/Users/jonat/Documents/report.pdf", "max_chars": 10000}
-```
-
----
-
-### `read_markdown`
-
-Read and return the contents of a Markdown file.
-
-**Parameters**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `file_path` | `string` | *(required)* | Absolute or relative path to the `.md` or `.markdown` file |
-| `max_chars` | `int` | `8000` | Maximum characters to return before truncating |
-
-**Returns:** The file's text content, truncated to `max_chars` if needed.
-
-**Example**
-
-```json
-{"file_path": "C:/Users/jonat/Documents/notes.md", "max_chars": 5000}
 ```
 
 ---
@@ -311,7 +218,7 @@ Fetch current weather for any location using the free [Open-Meteo API](https://o
 | `location` | `string` | *(required)* | City name or region (e.g. `"London"`, `"New York"`, `"Tokyo"`) |
 | `units` | `string` | `"metric"` | `"metric"` (°C, km/h) or `"imperial"` (°F, mph) |
 
-**Returns:** A short summary including conditions, temperature, humidity, and wind speed.
+**Returns:** Current conditions, temperature, humidity, and wind speed.
 
 **Example output**
 
@@ -358,19 +265,22 @@ Fetch the content of any URL and return it as plain text. HTML pages are strippe
 | `url` | `string` | *(required)* | URL to fetch (must start with `http://` or `https://`) |
 | `max_chars` | `int` | `4000` | Maximum characters to return before truncating |
 
-**Returns:** Extracted page text, truncated to `max_chars` if needed. Returns a descriptive error string if the connection fails (e.g. SSL error, timeout, HTTP error) rather than raising an exception.
+**Returns:** Extracted page text, truncated to `max_chars` if needed. Returns a descriptive error string on connection failure rather than raising an exception.
 
 **Example**
 
 ```json
-{"url": "https://en.wikipedia.org/wiki/Python_(programming_language)", "max_chars": 2000}
+{
+  "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+  "max_chars": 2000
+}
 ```
 
 ---
 
 ### `news_headlines`
 
-Fetch the latest news headlines, optionally filtered by a topic keyword. Requires a free [NewsAPI](https://newsapi.org) key set in `.env`.
+Fetch the latest news headlines, optionally filtered by topic. Requires a free [NewsAPI](https://newsapi.org) key.
 
 **Parameters**
 
@@ -380,16 +290,241 @@ Fetch the latest news headlines, optionally filtered by a topic keyword. Require
 | `country` | `string` | `"us"` | 2-letter country code used when `topic` is blank (e.g. `us`, `gb`, `au`, `de`) |
 | `max_results` | `int` | `5` | Number of headlines to return (1–10) |
 
-**Returns:** A numbered list of headlines with source name, publication date, and URL.
+**Returns:** Numbered list of headlines with source, publication date, and URL.
+
+**Example**
+
+```json
+{"topic": "artificial intelligence", "max_results": 3}
+```
 
 **Example output**
 
 ```
-1. [BBC News] Scientists discover new exoplanet
+1. [BBC News] OpenAI releases new model
    Published: 2025-03-01
    https://bbc.co.uk/...
 
 2. [Reuters] ...
+```
+
+---
+
+### `read_pdf`
+
+Extract and return the text content of a PDF file, organised by page. Image-only (scanned) PDFs return a clear message rather than empty output.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `file_path` | `string` | *(required)* | Absolute or relative path to the PDF file |
+| `max_chars` | `int` | `8000` | Maximum characters to return before truncating |
+
+**Returns:** Extracted text organised by page, truncated to `max_chars` if needed.
+
+**Example**
+
+```json
+{"file_path": "/home/user/documents/report.pdf", "max_chars": 10000}
+```
+
+---
+
+### `read_markdown`
+
+Read and return the contents of a Markdown file.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `file_path` | `string` | *(required)* | Absolute or relative path to the `.md` or `.markdown` file |
+| `max_chars` | `int` | `8000` | Maximum characters to return before truncating |
+
+**Returns:** The file's text content, truncated to `max_chars` if needed.
+
+**Example**
+
+```json
+{"file_path": "/home/user/documents/notes.md"}
+```
+
+---
+
+### `create_file`
+
+Create a new file with the given name and content. Rejects path traversal attempts and validates the filename before writing.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `file_name` | `string` | *(required)* | Basename of the file to create (no path separators allowed) |
+| `content` | `string` | *(required)* | Text content to write to the file |
+| `directory` | `string` | `null` | Subdirectory to create the file in (relative to the server's working directory). Created if it doesn't exist |
+| `encoding` | `string` | `"utf-8"` | Character encoding for the file |
+| `overwrite` | `bool` | `false` | If `true`, overwrite an existing file at the same path |
+
+**Returns:** A JSON object with keys:
+- `success` — `true` if the file was created
+- `file_path` — absolute path to the created file (`null` on failure)
+- `error` — error message if `success` is `false`
+- `message` — human-readable status
+
+**Examples**
+
+```json
+{"file_name": "notes.md", "content": "# My Notes\n"}
+```
+
+```json
+{
+  "file_name": "config.json",
+  "content": "{\"debug\": true}",
+  "directory": "src",
+  "overwrite": true
+}
+```
+
+---
+
+### `get_stock_price`
+
+Get the current stock price and key market data for a ticker symbol via the [Yahoo Finance API](https://finance.yahoo.com/). No API key required.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `ticker` | `string` | *(required)* | Stock ticker symbol (e.g. `"AAPL"`, `"MSFT"`, `"TSLA"`, `"BTC-USD"`) |
+
+**Returns:** Current price, daily change, day range, 52-week range, volume, and market cap.
+
+**Example**
+
+```json
+{"ticker": "NVDA"}
+```
+
+**Example output**
+
+```
+NVIDIA Corp (NVDA)
+  Price:       875.40 USD
+  Change:      +12.30 (+1.43%)
+  Prev close:  863.10 USD
+  Day range:   860.00 – 879.50 USD
+  52-wk range: 410.00 – 974.00 USD
+  Volume:      42,381,200
+  Market cap:  2.16T USD
+```
+
+> **Tip:** Crypto pairs are also supported (e.g. `"BTC-USD"`, `"ETH-USD"`).
+
+---
+
+### `summarize_text`
+
+Summarize a block of text using the local LLM. Long texts are automatically split into chunks, each summarized independently, then merged into a single coherent summary.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `text` | `string` | *(required)* | The text to summarize. Can be arbitrarily long |
+| `focus` | `string` | `""` | Optional instruction to guide the summary (e.g. `"key risks"`, `"action items"`, `"technical details"`). Leave blank for a general summary |
+| `max_length` | `int` | `200` | Approximate maximum length of the summary in tokens. Controls verbosity |
+
+**Returns:** A concise summary of the input text.
+
+**Examples**
+
+```json
+{"text": "... (long article) ..."}
+```
+
+```json
+{
+  "text": "... (meeting transcript) ...",
+  "focus": "action items",
+  "max_length": 150
+}
+```
+
+```json
+{
+  "text": "... (technical document) ...",
+  "focus": "key risks",
+  "max_length": 300
+}
+```
+
+---
+
+### `run_agent`
+
+Run an autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent powered by the local LLM. The agent reasons step by step and calls tools as many times as needed before producing a final answer.
+
+**How it works**
+
+```
+User goal
+   ↓
+LLM decides: call a tool or answer?
+   ↓ (if tool)
+Tool executes → result fed back to LLM
+   ↓
+LLM decides again … (repeats up to max_steps)
+   ↓ (when done)
+FINAL answer returned
+```
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `goal` | `string` | *(required)* | The task or question for the agent to solve |
+| `max_steps` | `int` | `10` | Maximum tool-call iterations before stopping |
+| `max_new_tokens` | `int` | `4096` | Token ceiling per LLM call. Mainly affects the length of the final answer |
+| `max_history_pairs` | `int` | `4` | Recent assistant+tool rounds to keep in full; older rounds are summarised |
+| `summary_strategy` | `string` | `"deterministic"` | `"deterministic"` — fast rule-based bullet points. `"llm"` — model-generated prose (adds an extra generation call) |
+| `upload_id` | `string` | `""` | ID returned by `POST /upload`. The file's contents are injected into the agent's context before the loop starts |
+
+**Returns:** The agent's final answer as plain text.
+
+> If you see `Agent stopped after N steps without a FINAL answer`, the agent exhausted its iterations. Either increase `max_steps` or simplify the goal.
+
+**Tools available to the agent**
+
+| Tool | Description |
+|---|---|
+| `get_weather` | Fetch current weather for any city |
+| `get_datetime` | Get the current date and time in any timezone |
+| `fetch_url` | Fetch and extract text from any URL |
+| `news_headlines` | Fetch the latest news headlines by topic |
+| `read_pdf` | Extract text from a PDF file at a given path |
+| `read_markdown` | Read the contents of a Markdown file at a given path |
+
+**Examples**
+
+```json
+{"goal": "What should I wear in Paris today?"}
+```
+
+```json
+{"goal": "Compare the weather in London and Tokyo, then tell me which city is warmer."}
+```
+
+```json
+{"goal": "Summarise this document", "upload_id": "3f8a1c..."}
+```
+
+```json
+{
+  "goal": "What are the top AI news stories today?",
+  "max_steps": 5
+}
 ```
 
 ---
@@ -400,7 +535,7 @@ Three tools that turn the server into an interactive programming tutor. The high
 
 ### `coding_tutor`
 
-An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for teaching. It reasons step by step, calling `explain_code`, `review_code`, and `fetch_url` as needed, then produces a pedagogical answer.
+An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for teaching. It reasons step by step, calling `explain_code`, `review_code`, and `fetch_url` as needed, then produces a pedagogical response.
 
 **Parameters**
 
@@ -410,21 +545,21 @@ An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for te
 | `max_steps` | `int` | `8` | Maximum tool-call iterations before stopping |
 | `max_new_tokens` | `int` | `1024` | Token ceiling per LLM call |
 | `max_history_pairs` | `int` | `4` | Recent assistant+tool rounds to keep before older ones are summarised |
-| `summary_strategy` | `string` | `"deterministic"` | `"deterministic"` (fast bullet-point summary) or `"llm"` (model-generated prose) |
+| `summary_strategy` | `string` | `"deterministic"` | `"deterministic"` (fast) or `"llm"` (prose, slower) |
 
 **Returns:** A teaching response as plain text.
 
 **Examples**
 
 ```json
-{"question": "Why does my list comprehension give the wrong result?\n\nmy_list = [1, 2, 3]\nresult = [x * 2 for x in my_list if x > 1]"}
+{"question": "Why does my list comprehension give the wrong result?\n\nresult = [x * 2 for x in [1, 2, 3] if x > 1]"}
 ```
 
 ```json
 {"question": "Explain the difference between a shallow copy and a deep copy in Python, with examples."}
 ```
 
-> **Tip:** The tutor infers your skill level from your question. Use plain language for beginner explanations, or technical terminology to get a more advanced response.
+> **Tip:** The tutor infers skill level from your question — use plain language for beginner explanations, technical terminology for advanced ones.
 
 ---
 
@@ -436,12 +571,22 @@ Explain a code snippet using the local LLM, tailored to the learner's skill leve
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `code` | `string` | *(required)* | The source code to explain (capped at 6000 chars) |
+| `code` | `string` | *(required)* | The source code to explain (capped at 6 000 chars) |
 | `language` | `string` | `"python"` | Programming language of the snippet |
 | `level` | `string` | `"beginner"` | Explanation depth: `"beginner"`, `"intermediate"`, or `"advanced"` |
 | `max_new_tokens` | `int` | `768` | Maximum tokens for the explanation |
 
 **Returns:** A plain-text explanation of the code.
+
+**Example**
+
+```json
+{
+  "code": "result = {k: v for k, v in zip(keys, values)}",
+  "language": "python",
+  "level": "beginner"
+}
+```
 
 ---
 
@@ -453,21 +598,30 @@ Review a code snippet for issues. Outputs a structured report: overall impressio
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `code` | `string` | *(required)* | The source code to review (capped at 6000 chars) |
+| `code` | `string` | *(required)* | The source code to review (capped at 6 000 chars) |
 | `language` | `string` | `"python"` | Programming language of the snippet |
 | `focus` | `string` | `"general"` | Review focus: `"general"`, `"security"`, `"performance"`, or `"style"` |
 | `max_new_tokens` | `int` | `768` | Maximum tokens for the review |
 
 **Returns:** A structured review with four sections: *Overall Impression*, *Issues Found*, *Positives*, and *Top Recommendation*.
 
----
+**Example**
 
+```json
+{
+  "code": "def get_user(id):\n    return db.execute(f'SELECT * FROM users WHERE id={id}')",
+  "language": "python",
+  "focus": "security"
+}
+```
+
+---
 
 ## Resources
 
 ### `llm://info`
 
-Returns metadata about the currently loaded model.
+Returns metadata about the currently loaded model (path, context size, GPU layers).
 
 ---
 
@@ -491,14 +645,24 @@ Add the server to your `claude_desktop_config.json`:
 }
 ```
 
+---
+
 ## Notes
 
 - The model is loaded once at startup via `llama-server` and held in memory for the lifetime of the server.
 - GPU offloading is controlled by `--gpu-layers`; `-1` offloads all layers.
-- `--context-size` sets the total token budget shared between the prompt and generated output. Increase it if you experience truncation on long responses.
+- `--context-size` sets the total token budget shared between prompt and generated output. Increase it if you experience truncation on long responses.
 - The HTTP transport binds to `0.0.0.0` by default, making it accessible from other machines on the network. Use `--host 127.0.0.1` to restrict to localhost. CORS is enabled for all origins — restrict `allow_origins` before exposing to untrusted networks.
 - Uploaded files (`POST /upload`) are stored in `uploads/` at the project root and automatically deleted on server shutdown.
 
+### Running a standalone llama-server (e.g. for opencode)
 
-### Running local llama server to connect with opencode
-`llama-server --model /path/to/model.gguf --port 8000 --host 127.0.0.1 --n-gpu-layers -1 --ctx-size 16384 --no-mmap`
+```bash
+llama-server \
+  --model /path/to/model.gguf \
+  --port 8000 \
+  --host 127.0.0.1 \
+  --n-gpu-layers -1 \
+  --ctx-size 16384 \
+  --no-mmap
+```
