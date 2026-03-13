@@ -505,6 +505,9 @@ FINAL answer returned
 | `news_headlines` | Fetch the latest news headlines by topic |
 | `read_pdf` | Extract text from a PDF file at a given path |
 | `read_markdown` | Read the contents of a Markdown file at a given path |
+| `get_stock_price` | Get the current stock price and market data for a ticker symbol |
+| `summarize_text` | Summarize a block of text using the local LLM |
+| `create_file` | Create a new file with the given name and content |
 
 **Examples**
 
@@ -549,6 +552,14 @@ An autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent specialised for te
 
 **Returns:** A teaching response as plain text.
 
+**Tools available to the tutor**
+
+| Tool | Description |
+|---|---|
+| `explain_code` | Explain a code snippet at the learner's skill level |
+| `review_code` | Review code for bugs, style, security, or performance issues |
+| `fetch_url` | Fetch documentation or a GitHub link referenced by the learner |
+
 **Examples**
 
 ```json
@@ -574,7 +585,7 @@ Explain a code snippet using the local LLM, tailored to the learner's skill leve
 | `code` | `string` | *(required)* | The source code to explain (capped at 6 000 chars) |
 | `language` | `string` | `"python"` | Programming language of the snippet |
 | `level` | `string` | `"beginner"` | Explanation depth: `"beginner"`, `"intermediate"`, or `"advanced"` |
-| `max_new_tokens` | `int` | `768` | Maximum tokens for the explanation |
+| `max_new_tokens` | `int` | `1024` | Maximum tokens for the explanation |
 
 **Returns:** A plain-text explanation of the code.
 

@@ -9,11 +9,14 @@ from fastmcp import FastMCP
 
 import upload
 from model import _log, generate_tokens
+from tools.create_file import _create_file
 from tools.date_time import _get_datetime
 from tools.fetch_url import _fetch_url
 from tools.read_pdf import _read_pdf
 from tools.read_markdown import _read_markdown
 from tools.news import _news_headlines
+from tools.stock_price import _get_stock_price
+from tools.summarize import _summarize_text
 from tools.weather import _fetch_weather
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -35,6 +38,12 @@ TOOLS AVAILABLE:
     Read and return the contents of a Markdown (.md) file given its path. Use this when the user provides a path to a Markdown file.
 - news_headlines(topic: str = "", country: str = "us", max_results: int = 5) -> str
     Search for the latest news headlines by topic. Use this when the user asks for news about a subject or location but has NOT provided a specific URL. Set topic to the user's location or subject of interest (e.g. "Solvang", "Santa Barbara"). Leave blank for general top headlines.
+- get_stock_price(ticker: str) -> str
+    Get the current stock price and market data for a ticker symbol (e.g. "AAPL", "TSLA", "BTC-USD").
+- summarize_text(text: str, focus: str = "", max_length: int = 200) -> str
+    Summarize a block of text using the local LLM. Optionally focus on specific aspects (e.g. "key risks", "action items").
+- create_file(file_name: str, content: str, directory: str = None, encoding: str = "utf-8", overwrite: bool = False) -> dict
+    Create a new file with the given name and content. file_name must be a plain basename (no path separators).
 
 To call a tool, output EXACTLY this format (nothing else on those lines):
 TOOL: <tool_name>
@@ -198,6 +207,24 @@ async def _execute_tool(name: str, args: dict) -> str:
             args.get("country", "us"),
             args.get("max_results", 5),
         )
+    elif name == "get_stock_price":
+        result = await _get_stock_price(args.get("ticker", ""))
+    elif name == "summarize_text":
+        result = await _summarize_text(
+            args.get("text", ""),
+            args.get("focus", ""),
+            args.get("max_length", 200),
+        )
+    elif name == "create_file":
+        raw = await _create_file(
+            args.get("file_name", ""),
+            args.get("content", ""),
+            args.get("directory"),
+            args.get("encoding", "utf-8"),
+            args.get("overwrite", False),
+        )
+        import json as _json
+        result = _json.dumps(raw)
     else:
         result = f"Unknown tool '{name}'."
 
