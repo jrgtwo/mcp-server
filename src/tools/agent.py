@@ -10,6 +10,7 @@ from fastmcp import FastMCP
 import upload
 from model import _log, generate_tokens
 from tools.create_file import _create_file
+from tools.list_directory import _list_directory
 from tools.date_time import _get_datetime
 from tools.fetch_url import _fetch_url
 from tools.read_pdf import _read_pdf
@@ -44,6 +45,8 @@ TOOLS AVAILABLE:
     Summarize a block of text using the local LLM. Optionally focus on specific aspects (e.g. "key risks", "action items").
 - create_file(file_name: str, content: str, directory: str = None, encoding: str = "utf-8", overwrite: bool = False) -> dict
     Create a new file with the given name and content. file_name must be a plain basename (no path separators).
+- list_directory(path: str, pattern: str = "*", recursive: bool = False, include_hidden: bool = False, max_results: int = 200) -> str
+    List files and directories at a given path. pattern supports globs e.g. "*.py". Set recursive=true to include subdirectories.
 
 To call a tool, output EXACTLY this format (nothing else on those lines):
 TOOL: <tool_name>
@@ -225,6 +228,14 @@ async def _execute_tool(name: str, args: dict) -> str:
         )
         import json as _json
         result = _json.dumps(raw)
+    elif name == "list_directory":
+        result = await _list_directory(
+            args.get("path", "."),
+            args.get("pattern", "*"),
+            args.get("recursive", False),
+            args.get("include_hidden", False),
+            args.get("max_results", 200),
+        )
     else:
         result = f"Unknown tool '{name}'."
 

@@ -22,6 +22,7 @@ src/
     ├── read_pdf.py      # Tool: read_pdf
     ├── read_markdown.py # Tool: read_markdown
     ├── create_file.py   # Tool: create_file
+    ├── list_directory.py# Tool: list_directory
     ├── stock_price.py   # Tool: get_stock_price
     ├── summarize.py     # Tool: summarize_text
     ├── agent.py         # Tool: run_agent (autonomous ReAct agent)
@@ -389,6 +390,52 @@ Create a new file with the given name and content. Rejects path traversal attemp
 
 ---
 
+### `list_directory`
+
+List the files and directories at a given path, with optional glob filtering and recursive traversal.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `path` | `string` | *(required)* | Absolute or relative path to the directory to list |
+| `pattern` | `string` | `"*"` | Glob pattern to filter results (e.g. `"*.py"`, `"data_*"`, `"**/*.json"`) |
+| `recursive` | `bool` | `false` | If `true`, traverse all subdirectories |
+| `include_hidden` | `bool` | `false` | If `true`, include files and folders whose names start with `"."` |
+| `max_results` | `int` | `200` | Maximum number of entries to return |
+
+**Returns:** A formatted listing showing `[DIR]` and `[FILE]` entries with file sizes, plus a summary count. Truncation is noted if `max_results` is reached.
+
+**Examples**
+
+```json
+{"path": "/home/user/projects"}
+```
+
+```json
+{
+  "path": "/home/user/projects/mcp-server",
+  "pattern": "*.py",
+  "recursive": true
+}
+```
+
+**Example output**
+
+```
+Directory: /home/user/projects/mcp-server/src
+
+  [DIR]  tools/
+  [FILE] llm_server.py  (4 KB)
+  [FILE] model.py       (7 KB)
+  [FILE] resources.py   (1 KB)
+  [FILE] upload.py      (2 KB)
+
+4 item(s) shown
+```
+
+---
+
 ### `get_stock_price`
 
 Get the current stock price and key market data for a ticker symbol via the [Yahoo Finance API](https://finance.yahoo.com/). No API key required.
@@ -508,6 +555,7 @@ FINAL answer returned
 | `get_stock_price` | Get the current stock price and market data for a ticker symbol |
 | `summarize_text` | Summarize a block of text using the local LLM |
 | `create_file` | Create a new file with the given name and content |
+| `list_directory` | List files and directories at a given path |
 
 **Examples**
 
