@@ -23,3 +23,6 @@ starlette
 
 # Stock price data (get_stock_price tool)
 yfinance
+
+# Audio transcription (transcribe_audio tool) — local Whisper inference
+faster-whisper

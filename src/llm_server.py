@@ -11,6 +11,7 @@ Tools exposed:
     get_datetime(timezone)           - current date and time for any IANA timezone
     fetch_url(url, max_chars)        - fetch and extract text from any URL
     news_headlines(topic, ...)       - latest news via NewsAPI (requires NEWSAPI_KEY)
+    transcribe_audio(audio_path, ...) - local speech-to-text via faster-whisper (no key needed)
 
 Resources:
     llm://info               - model metadata

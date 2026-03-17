@@ -28,7 +28,8 @@ src/
     ├── agent.py         # Tool: run_agent (autonomous ReAct agent)
     ├── explain_code.py  # Tool: explain_code (coding tutor)
     ├── review_code.py   # Tool: review_code  (coding tutor)
-    └── coding_tutor.py  # Tool: coding_tutor (orchestrating tutor agent)
+    ├── coding_tutor.py  # Tool: coding_tutor (orchestrating tutor agent)
+    └── transcribe_audio.py # Tool: transcribe_audio
 ```
 
 ---
@@ -50,6 +51,17 @@ On Windows, IANA timezone data is not bundled with Python. Install it for the `g
 
 ```bash
 pip install tzdata
+```
+
+The `transcribe_audio` tool requires `faster-whisper`, which is listed in `requirements.txt` but has an optional CUDA-accelerated variant. For GPU inference, install the matching PyTorch CUDA build first:
+
+```bash
+# CPU-only (default)
+pip install faster-whisper
+
+# GPU (CUDA 12)
+pip install faster-whisper
+pip install torch --index-url https://download.pytorch.org/whl/cu128
 ```
 
 ---
@@ -509,6 +521,47 @@ Summarize a block of text using the local LLM. Long texts are automatically spli
 
 ---
 
+### `transcribe_audio`
+
+Transcribe an audio file to text using a local [Whisper](https://github.com/openai/whisper) model via [faster-whisper](https://github.com/SYSTRAN/faster-whisper). Runs entirely on-device — no API key or internet connection required. Models are downloaded automatically on first use and cached locally.
+
+**Supported formats:** mp3, mp4, wav, flac, ogg, m4a, webm, and most ffmpeg-readable formats.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `audio_path` | `string` | *(required)* | Absolute or relative path to the audio file |
+| `model_size` | `string` | `"base"` | Whisper model to use: `"tiny"` (~150 MB), `"base"` (~290 MB), `"small"` (~970 MB), `"medium"` (~3.1 GB), `"large-v3"` (~6.2 GB) |
+| `language` | `string` | `null` | ISO-639-1 language code to force (e.g. `"en"`, `"fr"`). Leave `null` to auto-detect |
+| `device` | `string` | `"auto"` | Inference device. `"auto"` selects CUDA if available, else CPU. Explicit: `"cuda"`, `"cpu"` |
+| `compute_type` | `string` | `"auto"` | Precision. `"auto"` uses `float16` on GPU and `int8` on CPU. Explicit: `"float16"`, `"int8"`, `"float32"` |
+
+**Returns:** A JSON object with keys:
+- `success` — `true` if transcription succeeded
+- `text` — the transcribed text (`null` on failure)
+- `language` — detected or forced language code
+- `duration_seconds` — audio duration in seconds
+- `error` — error message if `success` is `false`
+
+**Examples**
+
+```json
+{"audio_path": "/home/user/recordings/meeting.mp3"}
+```
+
+```json
+{
+  "audio_path": "/home/user/recordings/lecture.wav",
+  "model_size": "small",
+  "language": "en"
+}
+```
+
+> **Tip:** Use `"tiny"` or `"base"` for fast transcription of short clips. Use `"small"` or higher for better accuracy on noisy audio or non-English speech.
+
+---
+
 ### `run_agent`
 
 Run an autonomous [ReAct](https://arxiv.org/abs/2210.03629) agent powered by the local LLM. The agent reasons step by step and calls tools as many times as needed before producing a final answer.
@@ -556,6 +609,7 @@ FINAL answer returned
 | `summarize_text` | Summarize a block of text using the local LLM |
 | `create_file` | Create a new file with the given name and content |
 | `list_directory` | List files and directories at a given path |
+| `transcribe_audio` | Transcribe an audio file to text using a local Whisper model |
 
 **Examples**
 
