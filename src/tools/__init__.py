@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from . import agent, chat, coding_tutor, create_file, date_time, explain_code, fetch_url, generate, list_directory, news, read_markdown, read_pdf, review_code, stock_price, summarize, transcribe_audio, weather
+from . import agent, chat, coding_tutor, create_file, date_time, explain_code, fetch_url, generate, list_directory, news, random_joke, read_markdown, read_pdf, review_code, stock_price, summarize, text_to_speech, transcribe_audio, weather, word_definition
 
 
 def register_all(mcp: FastMCP) -> None:
@@ -26,3 +26,7 @@ def register_all(mcp: FastMCP) -> None:
     list_directory.register(mcp)
     # Audio tools
     transcribe_audio.register(mcp)
+    text_to_speech.register(mcp)
+    # Fun / language tools
+    word_definition.register(mcp)
+    random_joke.register(mcp)

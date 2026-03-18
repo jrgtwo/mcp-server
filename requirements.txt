@@ -26,3 +26,6 @@ yfinance
 
 # Audio transcription (transcribe_audio tool) — local Whisper inference
 faster-whisper
+
+# Text-to-speech (text_to_speech tool)
+gtts
