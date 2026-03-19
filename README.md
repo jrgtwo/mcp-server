@@ -29,7 +29,10 @@ src/
     ├── explain_code.py  # Tool: explain_code (coding tutor)
     ├── review_code.py   # Tool: review_code  (coding tutor)
     ├── coding_tutor.py  # Tool: coding_tutor (orchestrating tutor agent)
-    └── transcribe_audio.py # Tool: transcribe_audio
+    ├── transcribe_audio.py # Tool: transcribe_audio
+    ├── text_to_speech.py   # Tool: text_to_speech
+    ├── word_definition.py  # Tool: define_word
+    └── random_joke.py      # Tool: get_random_joke
 ```
 
 ---
@@ -629,6 +632,141 @@ FINAL answer returned
 {
   "goal": "What are the top AI news stories today?",
   "max_steps": 5
+}
+```
+
+---
+
+### `text_to_speech`
+
+Convert text to an MP3 audio file using [Google Text-to-Speech (gTTS)](https://gtts.readthedocs.io/). Requires an internet connection. No API key required.
+
+> **Dependency:** Install `gTTS` before using this tool:
+> ```bash
+> pip install gtts
+> ```
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `text` | `string` | *(required)* | The text to convert to speech |
+| `output_path` | `string` | *(required)* | File path where the MP3 will be saved (e.g. `"output/speech.mp3"`). Parent directories are created automatically |
+| `lang` | `string` | `"en"` | BCP-47 language code (e.g. `"en"`, `"fr"`, `"es"`, `"de"`, `"ja"`) |
+| `slow` | `bool` | `false` | If `true`, speech is generated at a slower rate |
+
+**Returns:** A JSON object with keys:
+- `success` — `true` if the file was saved successfully
+- `output_path` — absolute path to the saved MP3 (`null` on failure)
+- `error` — error message if `success` is `false`
+
+**Examples**
+
+```json
+{
+  "text": "Hello, world!",
+  "output_path": "output/hello.mp3"
+}
+```
+
+```json
+{
+  "text": "Bonjour le monde",
+  "output_path": "output/bonjour.mp3",
+  "lang": "fr",
+  "slow": true
+}
+```
+
+---
+
+### `define_word`
+
+Look up the definition, phonetics, synonyms, and antonyms of an English word using the free [Dictionary API](https://dictionaryapi.dev/). No API key required.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `word` | `string` | *(required)* | The English word to look up (e.g. `"ephemeral"`, `"serendipity"`) |
+
+**Returns:** A JSON object with keys:
+- `success` — `true` if the word was found
+- `word` — the normalised word that was looked up
+- `results` — list of meanings, each containing:
+  - `phonetic` — IPA phonetic spelling (may be `null`)
+  - `part_of_speech` — e.g. `"noun"`, `"verb"`, `"adjective"`
+  - `definitions` — up to 3 definitions, each with `definition`, `example` (may be `null`), `synonyms` (up to 5), `antonyms` (up to 5)
+  - `synonyms` — up to 5 synonyms for this part of speech
+  - `antonyms` — up to 5 antonyms for this part of speech
+- `error` — error message if `success` is `false`
+
+**Example**
+
+```json
+{"word": "ephemeral"}
+```
+
+**Example output (abbreviated)**
+
+```json
+{
+  "success": true,
+  "word": "ephemeral",
+  "results": [
+    {
+      "phonetic": "/ɪˈfɛm(ə)r(ə)l/",
+      "part_of_speech": "adjective",
+      "definitions": [
+        {
+          "definition": "Lasting for a very short time.",
+          "example": "fashions are ephemeral",
+          "synonyms": ["transitory", "transient", "fleeting"],
+          "antonyms": ["permanent", "eternal"]
+        }
+      ],
+      "synonyms": ["transitory", "transient"],
+      "antonyms": ["permanent"]
+    }
+  ],
+  "error": null
+}
+```
+
+---
+
+### `get_random_joke`
+
+Fetch a random joke from the free [JokeAPI](https://v2.jokeapi.dev/). No API key required.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `category` | `string` | `"Any"` | Joke category: `"Any"`, `"Programming"`, `"Misc"`, `"Dark"`, `"Pun"`, `"Spooky"`, `"Christmas"` |
+| `joke_type` | `string` | `"any"` | Format filter: `"any"`, `"single"` (one-liner), `"twopart"` (setup + punchline) |
+| `safe_mode` | `bool` | `true` | If `true`, excludes explicit, racist, sexist, and religious jokes |
+
+**Returns:** A JSON object with keys:
+- `success` — `true` if a joke was returned
+- `category` — the category the joke belongs to
+- `type` — `"single"` or `"twopart"`
+- `joke` — the joke text; two-part jokes are formatted as `"setup\n\n— delivery"`
+- `error` — error message if `success` is `false`
+
+> **Note:** The `"Dark"` category is unavailable when `safe_mode` is `true`.
+
+**Examples**
+
+```json
+{"category": "Programming"}
+```
+
+```json
+{
+  "category": "Pun",
+  "joke_type": "twopart",
+  "safe_mode": true
 }
 ```
 

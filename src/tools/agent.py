@@ -12,13 +12,19 @@ from model import _log, generate_tokens
 from tools.create_file import _create_file
 from tools.list_directory import _list_directory
 from tools.date_time import _get_datetime
+from tools.explain_code import _explain_code
 from tools.fetch_url import _fetch_url
+from tools.random_joke import _fetch_joke
 from tools.read_pdf import _read_pdf
 from tools.read_markdown import _read_markdown
 from tools.news import _news_headlines
+from tools.review_code import _review_code
 from tools.stock_price import _get_stock_price
 from tools.summarize import _summarize_text
+from tools.text_to_speech import _text_to_speech
+from tools.transcribe_audio import _transcribe_audio
 from tools.weather import _fetch_weather
+from tools.word_definition import _define_word
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -47,6 +53,18 @@ TOOLS AVAILABLE:
     Create a new file with the given name and content. file_name must be a plain basename (no path separators).
 - list_directory(path: str, pattern: str = "*", recursive: bool = False, include_hidden: bool = False, max_results: int = 200) -> str
     List files and directories at a given path. pattern supports globs e.g. "*.py". Set recursive=true to include subdirectories.
+- explain_code(code: str, language: str = "python", level: str = "beginner") -> str
+    Explain a code snippet at the requested skill level. level options: "beginner", "intermediate", "advanced".
+- review_code(code: str, language: str = "python", focus: str = "general") -> str
+    Review code for issues. focus options: "general", "security", "performance", "style".
+- transcribe_audio(audio_path: str, model_size: str = "base", language: str = null, device: str = "auto", compute_type: str = "auto") -> dict
+    Transcribe an audio file to text using a local Whisper model. Returns {success, text, language, duration_seconds, error}.
+- text_to_speech(text: str, output_path: str, lang: str = "en", slow: bool = false) -> dict
+    Convert text to speech and save as an MP3 file using gTTS. Returns {success, output_path, error}.
+- define_word(word: str) -> dict
+    Look up the definition, phonetics, synonyms, and antonyms of an English word. Returns {success, word, results, error}.
+- get_random_joke(category: str = "Any", joke_type: str = "any", safe_mode: bool = true) -> dict
+    Fetch a random joke. category options: "Any", "Programming", "Misc", "Dark", "Pun", "Spooky", "Christmas". Returns {success, category, type, joke, error}.
 
 To call a tool, output EXACTLY this format (nothing else on those lines):
 TOOL: <tool_name>
@@ -236,6 +254,51 @@ async def _execute_tool(name: str, args: dict) -> str:
             args.get("include_hidden", False),
             args.get("max_results", 200),
         )
+    elif name == "explain_code":
+        result = await asyncio.to_thread(
+            _explain_code,
+            args.get("code", ""),
+            args.get("language", "python"),
+            args.get("level", "beginner"),
+        )
+    elif name == "review_code":
+        result = await asyncio.to_thread(
+            _review_code,
+            args.get("code", ""),
+            args.get("language", "python"),
+            args.get("focus", "general"),
+        )
+    elif name == "transcribe_audio":
+        import json as _json
+        raw = await _transcribe_audio(
+            args.get("audio_path", ""),
+            args.get("model_size", "base"),
+            args.get("language"),
+            args.get("device", "auto"),
+            args.get("compute_type", "auto"),
+        )
+        result = _json.dumps(raw)
+    elif name == "text_to_speech":
+        import json as _json
+        raw = await _text_to_speech(
+            args.get("text", ""),
+            args.get("output_path", ""),
+            args.get("lang", "en"),
+            args.get("slow", False),
+        )
+        result = _json.dumps(raw)
+    elif name == "define_word":
+        import json as _json
+        raw = await _define_word(args.get("word", ""))
+        result = _json.dumps(raw)
+    elif name == "get_random_joke":
+        import json as _json
+        raw = await _fetch_joke(
+            args.get("category", "Any"),
+            args.get("joke_type", "any"),
+            args.get("safe_mode", True),
+        )
+        result = _json.dumps(raw)
     else:
         result = f"Unknown tool '{name}'."
 
